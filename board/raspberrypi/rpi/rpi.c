@@ -15,6 +15,7 @@
 #include <memalign.h>
 #include <mmc.h>
 #include <asm/gpio.h>
+#include <asm/arch/fw_mem.h>
 #include <asm/arch/mbox.h>
 #include <asm/arch/msg.h>
 #include <asm/arch/sdhci.h>
@@ -38,6 +39,14 @@ DECLARE_GLOBAL_DATA_PTR;
  * does not get cleared later.
  */
 unsigned long __section(".data") fw_dtb_pointer;
+
+unsigned long rpi_fw_dtb_pointer(void)
+{
+	if (fdt_magic(fw_dtb_pointer) != FDT_MAGIC)
+		return 0;
+
+	return fw_dtb_pointer;
+}
 
 /* TODO(sjg@chromium.org): Move these to the msg.c file */
 struct msg_get_arm_mem {
@@ -474,6 +483,7 @@ static void set_serial_number(void)
 
 int misc_init_r(void)
 {
+	rpi_fw_mem_protect();
 	set_fdt_addr();
 	set_fdtfile();
 	set_usbethaddr();
@@ -653,9 +663,19 @@ int ft_board_setup(void *blob, struct bd_info *bd)
 	}
 
 #ifdef CONFIG_EFI_LOADER
-	/* Reserve the spin table */
-	efi_add_memory_map(0, CONFIG_RPI_EFI_NR_SPIN_PAGES << EFI_PAGE_SHIFT,
-			   EFI_RESERVED_MEMORY_TYPE);
+	/*
+	 * Reserve the spin table.  On BCM2712 the resident TF-A BL31 that
+	 * serves PSCI lives in the same low DRAM, so reserve all of it rather
+	 * than just the mailbox page - an allocation landing on BL31 costs
+	 * the secondary cores.
+	 */
+	if (of_machine_is_compatible("brcm,bcm2712"))
+		efi_add_memory_map(BCM2712_FW_MEM_BASE, BCM2712_FW_MEM_SIZE,
+				   EFI_RESERVED_MEMORY_TYPE);
+	else
+		efi_add_memory_map(0,
+				   CONFIG_RPI_EFI_NR_SPIN_PAGES << EFI_PAGE_SHIFT,
+				   EFI_RESERVED_MEMORY_TYPE);
 #endif
 
 	return 0;
