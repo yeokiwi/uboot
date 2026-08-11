@@ -7,4 +7,18 @@ config RPI_EFI_NR_SPIN_PAGES
 	  Number of pages to reserve starting at page 0 for spin tables in the EFI
 	  memory map
 
+config CMD_BOOTCIRCLE
+	bool "bootcircle - start a Circle bare metal application"
+	depends on ARM64
+	help
+	  Circle (https://github.com/rsta2/circle) is a C++ bare metal
+	  environment for the Raspberry Pi.  Its kernel image is a raw binary
+	  that has to be entered at 0x80000 with the MMU and caches off, so
+	  neither booti nor go can start it.
+
+	  Say Y here to get a bootcircle command that reproduces the hand-off
+	  the Raspberry Pi armstub performs, including the device tree pointer
+	  Circle expects at address 0xF8 and, on BCM2712, the repair of the
+	  resident EL3 firmware that Circle's multi-core support needs.
+
 endif

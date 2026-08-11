@@ -31,4 +31,37 @@
  */
 #define CFG_SYS_SDRAM_SIZE		SZ_128M
 
+#ifdef CONFIG_CMD_BOOTCIRCLE
+/*
+ * Chain-booting a Circle bare metal application.
+ *
+ * circle_addr is fixed by Circle itself (MEM_KERNEL_START); loading anywhere
+ * below it would land on the resident EL3 firmware, which bootcircle refuses
+ * and the LMB reservation prevents.
+ *
+ * circle_full_hw selects how much hardware U-Boot brings up before handing
+ * over.  The default leaves the RP1, PCIe and the framebuffer as the firmware
+ * left them, which is the safest state for Circle to initialise from.  Set it
+ * to 1 and save the environment to get a USB keyboard and HDMI console in
+ * U-Boot itself.
+ */
+#define CFG_EXTRA_ENV_SETTINGS \
+	"circle_kernel=kernel_2712.img\0" \
+	"circle_addr=0x80000\0" \
+	"circle_dev=mmc\0" \
+	"circle_part=0:1\0" \
+	"circle_full_hw=0\0" \
+	"circle_preboot=" \
+		"if test ${circle_full_hw} -eq 1; then " \
+			"pci enum; usb start; " \
+		"fi\0" \
+	"circle_load=" \
+		"fatload ${circle_dev} ${circle_part} " \
+			"${circle_addr} ${circle_kernel}\0" \
+	"circle_boot=" \
+		"if run circle_load; then " \
+			"bootcircle ${circle_addr}; " \
+		"fi\0"
+#endif
+
 #endif
