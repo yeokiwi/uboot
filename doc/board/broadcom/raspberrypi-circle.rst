@@ -95,6 +95,25 @@ giving::
 The ``.dtb`` and ``.dtbo`` come from the ``boot/`` directory of a Circle
 checkout once ``make`` there has downloaded the firmware.
 
+Serial console
+--------------
+
+U-Boot and a stock Circle application come out of two different connectors on
+the Raspberry Pi 5, both at 115200 8N1:
+
+======================  ==============================  ====================
+Output                  UART                            Connector
+======================  ==============================  ====================
+U-Boot                  ``uart10`` at ``0x107d001000``,  the 3-pin debug
+                        the device tree ``stdout-path``  UART header
+Circle, as shipped      RP1 UART0 at ``0x1f00030000``,   GPIO 14/15, header
+                        ``CSerialDevice`` device 0       pins 8 and 10
+======================  ==============================  ====================
+
+Either use two adapters, or construct Circle's serial device as device 10 -
+``CSerialDevice m_Serial {&m_Interrupt, FALSE, 10};`` - to put everything on
+the debug header.
+
 Booting
 -------
 
