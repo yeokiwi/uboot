@@ -1,0 +1,28 @@
+#
+# Raspberry Pi 5 firmware configuration for chain-booting a Circle bare metal
+# application through U-Boot.
+#
+# Copy this to the first (FAT) partition of the SD card as config.txt, next to
+# u-boot.bin.  mk-circle-sdcard.sh does that for you.
+#
+# The firmware loads u-boot.bin in place of the kernel image; U-Boot relocates
+# itself to the top of RAM and then loads the Circle image back into 0x80000,
+# where Circle has to run.
+#
+
+arm_64bit=1
+kernel=u-boot.bin
+
+# Circle links at 0x80000 (MEM_KERNEL_START).  U-Boot is position independent
+# and relocates, but it still has to be loaded 4 KiB aligned, and keeping the
+# same address as Circle means one less thing to get wrong.
+kernel_address=0x80000
+
+# Circle sets the clocks it wants itself.
+initial_turbo=0
+
+# Serial console on the 3-pin debug UART header.
+enable_uart=1
+
+# Uncomment for JTAG / SWD debugging.
+#enable_jtag_gpio=1
