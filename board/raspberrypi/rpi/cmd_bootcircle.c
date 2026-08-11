@@ -57,7 +57,8 @@
 
 /*
  * The secondary core reports in with its caches off, so the flag needs a
- * cache line to itself.
+ * cache line to itself.  It is read back with readq() after invalidating
+ * that line, never through the compiler's idea of what it holds.
  */
 static u64 smp_probe_flag[ARCH_DMA_MINALIGN / sizeof(u64)]
 	__aligned(ARCH_DMA_MINALIGN);
@@ -68,7 +69,7 @@ static u64 smp_probe_flag[ARCH_DMA_MINALIGN / sizeof(u64)]
  * tree and take over sysreset on every Raspberry Pi sharing this binary.
  * This command only needs to make the call, not to own PSCI.
  */
-static long bootcircle_smc(ulong function, ulong arg0, ulong arg1, ulong arg2)
+static s32 bootcircle_smc(ulong function, ulong arg0, ulong arg1, ulong arg2)
 {
 	register ulong x0 asm("x0") = function;
 	register ulong x1 asm("x1") = arg0;
@@ -81,7 +82,11 @@ static long bootcircle_smc(ulong function, ulong arg0, ulong arg1, ulong arg2)
 		     : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
 		       "x12", "x13", "x14", "x15", "x16", "x17", "memory");
 
-	return (long)x0;
+	/*
+	 * Every function used here returns an int32 in w0.  Truncate rather
+	 * than trusting the top half of x0 to be zero.
+	 */
+	return (s32)x0;
 }
 
 static bool is_bcm2712(void)
@@ -89,7 +94,7 @@ static bool is_bcm2712(void)
 	return of_machine_is_compatible("brcm,bcm2712");
 }
 
-static const char *affinity_info_str(long state)
+static const char *affinity_info_str(s32 state)
 {
 	switch (state) {
 	case AFFINITY_INFO_ON:
@@ -116,8 +121,9 @@ static const char *affinity_info_str(long state)
 static int bootcircle_smp_probe(unsigned int core)
 {
 	ulong addr = (ulong)map_to_sysmem(smp_probe_flag);
+	u64 reported = 0;
 	ulong start;
-	long ret;
+	s32 ret;
 
 	smp_probe_flag[0] = 0;
 	flush_dcache_range(addr, addr + sizeof(smp_probe_flag));
@@ -125,7 +131,7 @@ static int bootcircle_smp_probe(unsigned int core)
 	ret = bootcircle_smc(ARM_PSCI_0_2_FN64_CPU_ON, MPIDR_FOR_CORE(core),
 			     (ulong)bootcircle_smp_probe_entry, addr);
 	if (ret != ARM_PSCI_RET_SUCCESS) {
-		printf("  core %u: CPU_ON failed (%ld)%s\n", core, ret,
+		printf("  core %u: CPU_ON failed (%d)%s\n", core, ret,
 		       ret == ARM_PSCI_RET_ALREADY_ON ?
 		       " - the core is already running, Circle will see this too" :
 		       "");
@@ -134,19 +140,20 @@ static int bootcircle_smp_probe(unsigned int core)
 
 	for (start = get_timer(0); get_timer(start) < 500;) {
 		invalidate_dcache_range(addr, addr + sizeof(smp_probe_flag));
-		if (smp_probe_flag[0]) {
-			printf("  core %u: started, MPIDR %#llx\n", core,
-			       smp_probe_flag[0] & ~(1ULL << 63));
+		reported = readq((void *)addr);
+		if (reported)
 			break;
-		}
 		udelay(100);
 	}
 
-	if (!smp_probe_flag[0]) {
+	if (!reported) {
 		printf("  core %u: CPU_ON returned success but the core never arrived\n",
 		       core);
 		return -ETIMEDOUT;
 	}
+
+	printf("  core %u: started, MPIDR %#llx\n", core,
+	       reported & ~(1ULL << 63));
 
 	/* Wait for it to take itself off again before handing over. */
 	for (start = get_timer(0); get_timer(start) < 500;) {
@@ -171,7 +178,7 @@ static int bootcircle_smp_probe(unsigned int core)
 static void bootcircle_psci_report(bool selftest)
 {
 	unsigned int core;
-	long version;
+	s32 version;
 
 	/*
 	 * Only BCM2712 is known to have an armstub that answers SMCs from
@@ -182,16 +189,16 @@ static void bootcircle_psci_report(bool selftest)
 
 	version = bootcircle_smc(ARM_PSCI_0_2_FN_PSCI_VERSION, 0, 0, 0);
 	if (version < 0) {
-		printf("PSCI: not available (%ld); Circle will be single core\n",
+		printf("PSCI: not available (%d); Circle will be single core\n",
 		       version);
 		return;
 	}
 
-	printf("PSCI: v%ld.%ld\n", (version >> 16) & 0xffff, version & 0xffff);
+	printf("PSCI: v%u.%u\n", (u32)version >> 16, (u32)version & 0xffff);
 
 	for (core = 1; core < CIRCLE_CORES; core++) {
-		long state = bootcircle_smc(ARM_PSCI_0_2_FN64_AFFINITY_INFO,
-					    MPIDR_FOR_CORE(core), 0, 0);
+		s32 state = bootcircle_smc(ARM_PSCI_0_2_FN64_AFFINITY_INFO,
+					   MPIDR_FOR_CORE(core), 0, 0);
 
 		if (state == AFFINITY_INFO_OFF)
 			continue;
@@ -264,9 +271,12 @@ static int do_bootcircle(struct cmd_tbl *cmdtp, int flag, int argc,
 
 	ptr = map_sysmem(CIRCLE_DTB_PTR32, sizeof(u32));
 	writel((u32)dtb, ptr);
-	flush_dcache_range(CIRCLE_DTB_PTR32,
-			   CIRCLE_DTB_PTR32 + ARCH_DMA_MINALIGN);
 	unmap_sysmem(ptr);
+
+	/* Circle reads this with its caches off: push the line out to DRAM */
+	flush_dcache_range(ALIGN_DOWN(CIRCLE_DTB_PTR32, ARCH_DMA_MINALIGN),
+			   ALIGN(CIRCLE_DTB_PTR32 + sizeof(u32),
+				 ARCH_DMA_MINALIGN));
 
 	cleanup_before_linux();
 

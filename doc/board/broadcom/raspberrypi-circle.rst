@@ -164,8 +164,12 @@ Circle's ``CPU_ON`` will return ``ALREADY_ON`` (-4).
 
 This is worth more than the version check alone: ``PSCI_VERSION`` answering
 only shows the SMC vector is intact, while ``CPU_ON`` exercises the parked
-cores and the trusted mailbox, which is the part that breaks.  Each core is
-taken back off afterwards, so Circle still finds them in the state it expects.
+cores and the trusted mailbox, which is the part that breaks.
+
+Each core takes itself back off once it has reported in, so a passing self
+test leaves them exactly as Circle expects to find them.  A core that starts
+but does not go off again is reported as such, and Circle will then see
+``ALREADY_ON`` for it - so use ``-t`` when diagnosing, not routinely.
 
 Testing multicore
 -----------------
