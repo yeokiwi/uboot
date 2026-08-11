@@ -21,4 +21,26 @@ config CMD_BOOTCIRCLE
 	  Circle expects at address 0xF8 and, on BCM2712, the repair of the
 	  resident EL3 firmware that Circle's multi-core support needs.
 
+config RPI_UART0_CONSOLE
+	bool "Console on UART0 (GPIO 14/15) instead of UART10 on BCM2712"
+	depends on ARM64 && PL01X_SERIAL
+	help
+	  The firmware device tree puts the Raspberry Pi 5 console on uart10,
+	  the PL011 in the BCM2712, which comes out of the 3-pin debug UART
+	  header next to the HDMI ports.  A Circle application as shipped uses
+	  UART0 of the RP1 southbridge instead, on GPIO 14/15 - pins 8 and 10
+	  of the 40-pin header - so U-Boot and the payload need two different
+	  cables.
+
+	  Say Y here to move the U-Boot console to UART0 as well, so that one
+	  cable sees the whole boot.  U-Boot muxes GPIO 14/15, binds a PL011
+	  at RP1 UART0 (0x1f00030000, 50 MHz) and drops the stdout-path the
+	  firmware provides.  Other Raspberry Pi models are unaffected: the
+	  console only moves when U-Boot is running on a BCM2712.
+
+	  This relies on the firmware having mapped RP1 at 0x1f00000000, the
+	  address it uses for USB and network boot and the one Circle and
+	  Linux expect.  If a firmware ever leaves RP1 unmapped there is no
+	  console at all, so say N to go back to the debug UART header.
+
 endif

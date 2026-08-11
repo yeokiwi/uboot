@@ -21,7 +21,9 @@ kernel_address=0x80000
 # Circle sets the clocks it wants itself.
 initial_turbo=0
 
-# Serial console on the 3-pin debug UART header.
+# Firmware output on the 3-pin debug UART header.  U-Boot and Circle talk on
+# RP1 UART0 (GPIO 14/15) instead, which needs nothing from the firmware, but
+# leaving this on means the firmware's own messages have somewhere to go.
 enable_uart=1
 
 # Uncomment for JTAG / SWD debugging.

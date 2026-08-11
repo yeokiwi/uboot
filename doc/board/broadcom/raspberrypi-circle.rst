@@ -98,21 +98,50 @@ checkout once ``make`` there has downloaded the firmware.
 Serial console
 --------------
 
-U-Boot and a stock Circle application come out of two different connectors on
-the Raspberry Pi 5, both at 115200 8N1:
+U-Boot and a stock Circle application both come out of GPIO 14/15 - pins 8 and
+10 of the 40-pin header - at 115200 8N1:
 
 ======================  ==============================  ====================
 Output                  UART                            Connector
 ======================  ==============================  ====================
-U-Boot                  ``uart10`` at ``0x107d001000``,  the 3-pin debug
-                        the device tree ``stdout-path``  UART header
-Circle, as shipped      RP1 UART0 at ``0x1f00030000``,   GPIO 14/15, header
-                        ``CSerialDevice`` device 0       pins 8 and 10
+U-Boot, this build      RP1 UART0 at ``0x1f00030000``    GPIO 14/15, header
+                                                         pins 8 and 10
+Circle, as shipped      RP1 UART0 at ``0x1f00030000``,   the same pins
+                        ``CSerialDevice`` device 0
 ======================  ==============================  ====================
 
-Either use two adapters, or construct Circle's serial device as device 10 -
-``CSerialDevice m_Serial {&m_Interrupt, FALSE, 10};`` - to put everything on
-the debug header.
+That is not the port the firmware picks for U-Boot.  The device tree it hands
+over says ``stdout-path = "serial10:115200n8"``, which is ``uart10`` at
+``0x107d001000`` - the PL011 inside the BCM2712, wired to the 3-pin debug UART
+header next to the HDMI ports - so out of the box the two halves of the boot
+talk on two different connectors.
+
+``CONFIG_RPI_UART0_CONSOLE``, enabled in ``rpi5_circle_defconfig``, moves the
+U-Boot console to UART0 of the RP1 southbridge instead
+(``board/raspberrypi/rpi/rp1_uart0.c``).  It binds a PL011 from platform data
+rather than from the device tree, because RP1 is only reachable at all thanks
+to the PCIe window the firmware set up for USB and network boot, and U-Boot
+wants a console long before it could enumerate PCIe itself.  Three things go
+with that:
+
+* GPIO 14/15 are muxed to their UART0 function by writing RP1's pad and
+  function select registers directly, the way Circle's ``CGPIOPin`` does.  The
+  firmware only sets up the debug UART pins.
+
+* The baud rate divisor is calculated for the 50 MHz RP1 UART clock the
+  firmware leaves running, which is the rate Circle assumes as well.
+
+* ``stdout-path`` is deleted from the firmware device tree, since a device
+  bound from platform data has no node for it to point at.  With no console
+  named, the serial uclass falls back to the first serial device it bound,
+  which is this one - platform data is bound before the device tree is
+  scanned.  Circle does not read ``stdout-path``; a Linux payload wants
+  ``console=`` on its command line once the console has moved.
+
+The console only moves on a BCM2712.  To keep U-Boot on the debug UART header
+instead, unset ``CONFIG_RPI_UART0_CONSOLE``; Circle can be moved there too, by
+constructing its serial device as device 10 -
+``CSerialDevice m_Serial {&m_Interrupt, FALSE, 10};``.
 
 Booting
 -------

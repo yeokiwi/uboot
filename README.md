@@ -83,8 +83,9 @@ prefix for a Pi 5 build is `aarch64-none-elf-`. Get it from
 
 - Raspberry Pi 5
 - SD card with a FAT32 first partition
-- A 3.3 V USB-to-serial adapter. **Read [Run](#run) before wiring it up** —
-  U-Boot and a stock Circle application come out of two different connectors.
+- A 3.3 V USB-to-serial adapter, on GPIO 14/15 — pins 8 and 10 of the 40-pin
+  header. This build puts U-Boot on the same UART a stock Circle application
+  uses, so one cable sees the whole boot; see [Run](#run).
 
 ---
 
@@ -178,20 +179,37 @@ By default the script looks for the `.dtb` and `.dtbo` in
 
 ### Wiring the serial console
 
-This is the one thing that catches people out. On the Raspberry Pi 5 the two
-halves of the boot talk on **different physical connectors**:
+One cable, on **GPIO 14/15** — pins 8 and 10 of the 40-pin header — at
+115200 8N1:
 
 | Output | UART | Where |
 |---|---|---|
-| U-Boot | `uart10` @ `0x107d001000`, the DT `stdout-path` | the dedicated 3-pin **debug UART** header next to the HDMI ports |
-| Circle, as shipped | RP1 UART0 @ `0x1f00030000`, `CSerialDevice` device 0 | **GPIO 14/15**, pins 8 and 10 of the 40-pin header |
+| U-Boot, this build | RP1 UART0 @ `0x1f00030000` | **GPIO 14/15**, pins 8 and 10 of the 40-pin header |
+| Circle, as shipped | RP1 UART0 @ `0x1f00030000`, `CSerialDevice` device 0 | the same pins |
 
-Both run at 115200 8N1. Pick one:
+That is not where the firmware would put U-Boot. The device tree it hands over
+says `stdout-path = "serial10:115200n8"`, which is `uart10` at
+`0x107d001000` — the PL011 inside the BCM2712, wired to the 3-pin **debug
+UART** header next to the HDMI ports. A stock Circle application talks on
+UART0 of the RP1 southbridge instead, so out of the box the two halves of the
+boot come out of two different connectors.
 
-- **Two adapters** (or move the cable once U-Boot hands over) — no code changes.
-- **One cable**: construct Circle's serial device as device 10 in your
-  application, e.g. `CSerialDevice m_Serial {&m_Interrupt, FALSE, 10};`, and
-  everything comes out of the debug header.
+`CONFIG_RPI_UART0_CONSOLE`, set in `rpi5_circle_defconfig`, moves U-Boot onto
+UART0 as well: it muxes GPIO 14/15 to their UART0 function, binds a PL011 at
+RP1 UART0 and drops the `stdout-path` the firmware provides so the serial
+uclass falls back to it. This only happens on a BCM2712; other Raspberry Pi
+models keep the console their device tree names.
+
+To go back to the debug UART header instead, put
+
+```
+# CONFIG_RPI_UART0_CONSOLE is not set
+```
+
+in the defconfig (or turn it off in `menuconfig`, under *Board-specific
+options*) and rebuild. Circle can be moved to the debug header the same way,
+by constructing its serial device as device 10 —
+`CSerialDevice m_Serial {&m_Interrupt, FALSE, 10};`.
 
 ### Boot
 
@@ -283,9 +301,13 @@ U-Boot> saveenv
 
 ## Troubleshooting
 
-**Nothing on the serial console at all.** Check you are on the right connector
-(see [Run](#run)), then that `config.txt` reached the card and says
-`kernel=u-boot.bin`.
+**Nothing on the serial console at all.** Check you are on GPIO 14/15 and not
+the debug header (see [Run](#run)), then that `config.txt` reached the card and
+says `kernel=u-boot.bin`. U-Boot on UART0 assumes the firmware has mapped RP1
+at `0x1f00000000`, the address it uses for USB and network boot and the one
+Circle expects; if a firmware ever leaves RP1 unmapped there is no U-Boot
+output at all, and unsetting `CONFIG_RPI_UART0_CONSOLE` puts the console back
+on the debug UART header.
 
 **U-Boot runs, Circle never starts.** Check the load succeeded and the address
 is `0x80000`. `bootcircle` prints the entry and DTB it is using.
@@ -353,7 +375,8 @@ project's work — about 1,100 lines:
 | `bootcircle` command and PSCI self test | `board/raspberrypi/rpi/cmd_bootcircle.c` |
 | Secondary core trampoline | `board/raspberrypi/rpi/bootcircle_smp.S` |
 | Hook, widened EFI reservation, `rpi_fw_dtb_pointer()` | `board/raspberrypi/rpi/rpi.c` |
-| `CONFIG_CMD_BOOTCIRCLE` | `board/raspberrypi/rpi/Kconfig` |
+| Console on RP1 UART0 instead of uart10 | `board/raspberrypi/rpi/rp1_uart0.c` |
+| `CONFIG_CMD_BOOTCIRCLE`, `CONFIG_RPI_UART0_CONSOLE` | `board/raspberrypi/rpi/Kconfig` |
 | `circle_*` environment | `include/configs/rpi.h` |
 | Board configuration | `configs/rpi5_circle_defconfig` |
 | SD card contents and helper script | `board/raspberrypi/rpi/circle/` |
@@ -392,6 +415,12 @@ Done in CI-equivalent conditions:
 - Hardcoded constants cross-checked against Circle master (`MEM_KERNEL_START`,
   `ARM_DTB_PTR32`) and TF-A rpi5 (`BL31_BASE`, `BL31_LIMIT`,
   `PLAT_RPI3_TM_ENTRYPOINT`)
+- The UART0 console constants likewise: base `0x1f00030000`, the 50 MHz RP1
+  UART clock, and function 4 on GPIO 14/15 all match Circle's `serial.cpp` and
+  `gpiopin2712.cpp`; the address is inside the PCIe region
+  `arch/arm/mach-bcm283x/init.c` maps for BCM2712, so it survives relocation.
+  Which serial device the uclass falls back to was traced through
+  `serial_find_console_or_panic()` rather than observed
 
 Not done:
 
