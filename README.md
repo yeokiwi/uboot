@@ -14,7 +14,15 @@ and loading over SD, USB or the network in front of a Circle application.
 > against Circle, U-Boot and TF-A sources. It has **not** been run on hardware —
 > QEMU has no `raspi5` machine. See [Verification status](#verification-status).
 
+There are two builds:
+
+| Config | Use it for |
+|---|---|
+| `rpi5_circle_defconfig` | The default. Touches as little hardware as possible so the hand-off matches what Circle sees from the firmware. SD card only. |
+| `rpi5_circle_net_defconfig` | Adds Raspberry Pi 5 Ethernet so Circle images can be pulled over **TFTP**. Requires U-Boot to bring up PCIe and the RP1 southbridge on every boot — see [Ethernet and TFTP](#ethernet-and-tftp). |
+
 - Detailed reference: [`doc/board/broadcom/raspberrypi-circle.rst`](doc/board/broadcom/raspberrypi-circle.rst)
+- Ethernet reference: [`doc/board/broadcom/raspberrypi-circle-net.rst`](doc/board/broadcom/raspberrypi-circle-net.rst)
 - Upstream U-Boot docs: [`doc/`](doc/), and the original [`README`](README)
 
 ---
@@ -27,6 +35,7 @@ and loading over SD, USB or the network in front of a Circle application.
 - [Install to an SD card](#install-to-an-sd-card)
 - [Run](#run)
 - [The U-Boot prompt](#the-u-boot-prompt)
+- [Ethernet and TFTP](#ethernet-and-tftp)
 - [Troubleshooting](#troubleshooting)
 - [Why multi-core needed fixing](#why-multi-core-needed-fixing)
 - [What was changed](#what-was-changed)
@@ -281,6 +290,60 @@ U-Boot> saveenv
 
 ---
 
+## Ethernet and TFTP
+
+Copying a new `kernel_2712.img` to the SD card for every build gets old fast.
+`rpi5_circle_net_defconfig` adds Ethernet so you can pull the image over TFTP:
+
+```bash
+make rpi5_circle_net_defconfig
+make -j"$(nproc)" CROSS_COMPILE=aarch64-linux-gnu-
+```
+
+Then, with `kernel_2712.img` in your TFTP root:
+
+```
+U-Boot> setenv serverip 192.168.1.10
+U-Boot> run circle_netboot
+```
+
+`run circle_netcheck` walks the whole chain (`pci`, `dm tree`, `mdio list`,
+`net list`) in one command, which is what you want the first time you bring it
+up. The layer-by-layer procedure is in
+[`raspberrypi-circle-net.rst`](doc/board/broadcom/raspberrypi-circle-net.rst).
+
+### What this actually required
+
+There is no Ethernet MAC on the BCM2712. On the Pi 5 it is a Cadence GEM
+*inside the RP1 southbridge*, which is a PCIe endpoint:
+
+```
+pcie2  brcm,bcm2712-pcie          <- root complex, in U-Boot already
+ └ pci@0,0
+    └ dev@0,0  pci1de4,1          <- RP1 endpoint, BAR1 = 4 MiB window
+       └ pci-ep-bus@1  simple-bus
+          ├ clocks@40018000   raspberrypi,rp1-clocks
+          ├ pinctrl@400d0000  raspberrypi,rp1-gpio
+          └ ethernet@40100000 raspberrypi,rp1-gem / cdns,macb
+```
+
+Only the root complex existed in U-Boot v2026.07 — and RP1 support is in no
+U-Boot release, including current master. The endpoint, clock and GPIO drivers
+plus the macb-over-PCI changes are carried here from Oleksii Moisieiev's
+[unmerged RFC series](https://patchwork.ozlabs.org/project/uboot/list/?series=442967),
+with original authorship preserved, and adapted on top.
+
+### Why it is a separate build
+
+Ethernet means U-Boot brings PCIe and RP1 up on every boot, and Circle then
+re-initialises hardware U-Boot has already configured. The default build
+deliberately leaves the hardware as the firmware left it, which is the state
+Circle is known to work from. Keeping them separate makes that an explicit
+choice and leaves a known-good fallback. Both builds get the multi-core fix and
+the firmware restore.
+
+---
+
 ## Troubleshooting
 
 **Nothing on the serial console at all.** Check you are on the right connector
@@ -343,8 +406,10 @@ This fork addresses it in three layers:
 
 ## What was changed
 
-Commit 1 is an unmodified U-Boot v2026.07 snapshot. Everything after it is this
-project's work — about 1,100 lines:
+Commit 1 is an unmodified U-Boot v2026.07 snapshot. Everything after it is
+either this project's work or the ported RP1 series.
+
+Circle support:
 
 | Change | File |
 |---|---|
@@ -358,6 +423,20 @@ project's work — about 1,100 lines:
 | Board configuration | `configs/rpi5_circle_defconfig` |
 | SD card contents and helper script | `board/raspberrypi/rpi/circle/` |
 | Reference documentation | `doc/board/broadcom/raspberrypi-circle.rst` |
+
+Ethernet, for TFTP boot — the RP1 drivers are carried from the
+[unmerged RFC series](https://patchwork.ozlabs.org/project/uboot/list/?series=442967)
+with original authorship preserved, then adapted:
+
+| Change | File |
+|---|---|
+| RP1 PCIe endpoint driver, BAR ordering workaround | `drivers/mfd/rp1.c` |
+| RP1 clock driver | `drivers/clk/clk-rp1.c` |
+| RP1 GPIO driver | `drivers/gpio/rp1_gpio.c` |
+| macb over PCI, `raspberrypi,rp1-gem`, mdio `reset-gpios` | `drivers/net/macb.c` |
+| RP1 probe hook, `board_type` | `board/raspberrypi/rpi/rpi.c` |
+| Network configuration | `configs/rpi5_circle_net_defconfig` |
+| Ethernet documentation | `doc/board/broadcom/raspberrypi-circle-net.rst` |
 
 ### The hand-off `bootcircle` performs
 
@@ -381,7 +460,8 @@ still on. `bootcircle` reproduces what the armstub does instead —
 
 Done in CI-equivalent conditions:
 
-- `rpi5_circle_defconfig` builds clean, zero compiler diagnostics
+- `rpi5_circle_defconfig` and `rpi5_circle_net_defconfig` build clean, zero
+  compiler diagnostics
 - `rpi_arm64_defconfig` builds clean, with `bootcircle` and the `circle_*`
   environment absent — no regression to the stock configuration
 - `rpi_2/3/4_defconfig` and `rpi_3_32b/4_32b_defconfig` build clean across both
@@ -392,6 +472,11 @@ Done in CI-equivalent conditions:
 - Hardcoded constants cross-checked against Circle master (`MEM_KERNEL_START`,
   `ARM_DTB_PTR32`) and TF-A rpi5 (`BL31_BASE`, `BL31_LIMIT`,
   `PLAT_RPI3_TM_ENTRYPOINT`)
+- RP1 clock IDs diffed against the upstream `raspberrypi,rp1-clocks.h` binding:
+  every shared ID matches, including `RP1_CLK_SYS`, `RP1_CLK_ETH` and
+  `RP1_CLK_ETH_TSU`
+- All RP1 drivers confirmed linked and registered (`clk_rp1`, `rp1_driver`,
+  `rp1_gpio`, `eth_macb`, `pcie_brcm_base`)
 
 Not done:
 
@@ -401,6 +486,9 @@ Not done:
 - The *mechanism* behind the multi-core failure is pinned down, but not the
   specific write that lands on the firmware region on any given setup. The fix
   is deliberately layered so it holds either way.
+- The RP1 Ethernet stack is an unmerged RFC adapted to a device tree it was not
+  written against. It is the least proven part of this tree — bring it up with
+  `run circle_netcheck` and the layer-by-layer procedure in the Ethernet doc.
 
 ---
 

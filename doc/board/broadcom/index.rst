@@ -10,4 +10,5 @@ Broadcom
    bcm7xxx
    raspberrypi
    raspberrypi-circle
+   raspberrypi-circle-net
    northstar
