@@ -63,6 +63,17 @@ static int rp1_probe(struct udevice *dev)
 	/* Turn on bus-mastering */
 	dm_pci_clrset_config16(dev, PCI_COMMAND, 0, PCI_COMMAND_MASTER | PCI_COMMAND_MEMORY);
 
+	/*
+	 * HACK: Set the BAR addresses in the order Linux ends up with.  The
+	 * Linux RP1 driver relies on the PCI BAR configuration, which Linux
+	 * assigns sorted by BAR size, giving the same layout on every boot.
+	 * U-Boot assigns without that sorting, so the result can differ and
+	 * the device-tree ranges no longer translate.  Force the Linux order
+	 * here.  Revisit once the RP1 driver is upstream in the Linux kernel.
+	 */
+	dm_pci_write_config32(dev, PCI_BASE_ADDRESS_1, 0);
+	dm_pci_write_config32(dev, PCI_BASE_ADDRESS_0, 0x40000);
+
 	ret = rp1_get_bar_region(dev, &rp1->bar_start);
 	if (ret)
 		return ret;
