@@ -50,6 +50,10 @@ config BCM2711_64B
 	select BCM2711
 	select DRIVER_GICV2
 	select ARM64
+
+config BCM2712
+	bool "Broadcom BCM2712 SoC support"
+	depends on ARCH_BCM283X
 	select CPU_ARMV8
 	select ARMV8_MULTIENTRY if GENERATE_ACPI_TABLE
 	select BLOBLIST if GENERATE_ACPI_TABLE
