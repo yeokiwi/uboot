@@ -14,6 +14,7 @@
 #include <init.h>
 #include <memalign.h>
 #include <mmc.h>
+#include <pci.h>
 #include <asm/gpio.h>
 #include <asm/arch/fw_mem.h>
 #include <asm/arch/mbox.h>
@@ -862,4 +863,32 @@ static int rpi_acpi_write_ssdt(struct acpi_ctx *ctx, const struct acpi_writer *e
 }
 
 ACPI_WRITER(5ssdt, "SSDT", rpi_acpi_write_ssdt, 0);
+#endif
+
+/*
+ * TODO: Using late_init to initialize the pci device with ID_RP1.
+ * The RP1 pci device should be initialized by the PCI subsystem, but the
+ * binding is still under development and the current device-tree format
+ * violates the PCI driver model.  This should be revisited once the RP1
+ * driver is upstream in the Linux kernel.
+ */
+#ifdef CONFIG_BCM2712
+int board_late_init(void)
+{
+	struct udevice *dev;
+	int err;
+
+	err = dm_pci_find_device(PCI_VENDOR_ID_RPI, PCI_DEVICE_ID_RP1_C0,
+				 0, &dev);
+	/*
+	 * This is a one-binary build shared with the BCM2711 and BCM2837
+	 * boards, which have no RP1 at all, so only complain where one was
+	 * actually expected.
+	 */
+	if (err && of_machine_is_compatible("brcm,bcm2712"))
+		printf("RPI: RP1 not found (%d), networking unavailable\n",
+		       err);
+
+	return 0;
+}
 #endif
