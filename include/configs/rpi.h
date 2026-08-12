@@ -61,7 +61,30 @@
 	"circle_boot=" \
 		"if run circle_load; then " \
 			"bootcircle ${circle_addr}; " \
-		"fi\0"
+		"fi\0" \
+	CIRCLE_NET_ENV_SETTINGS
+
+/*
+ * Ethernet on the Raspberry Pi 5 is a Cadence GEM inside RP1, behind PCIe,
+ * so a network boot has to bring PCIe and RP1 up first.  Only offered where
+ * the driver stack is actually built in - see rpi5_circle_net_defconfig.
+ */
+#ifdef CONFIG_MACB
+#define CIRCLE_NET_ENV_SETTINGS \
+	"circle_tftp=tftp ${circle_addr} ${circle_kernel}\0" \
+	"circle_netboot=" \
+		"if dhcp && run circle_tftp; then " \
+			"bootcircle ${circle_addr}; " \
+		"fi\0" \
+	"circle_netcheck=" \
+		"echo '-- pci --'; pci enum; pci; " \
+		"echo '-- rp1 --'; dm tree; " \
+		"echo '-- mdio --'; mdio list; " \
+		"echo '-- eth --'; net list\0"
+#else
+#define CIRCLE_NET_ENV_SETTINGS
+#endif
+
 #endif
 
 #endif

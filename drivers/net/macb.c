@@ -1460,6 +1460,26 @@ static int macb_eth_of_to_plat(struct udevice *dev)
 
 	macb->phy_reset_ms = ofnode_read_s32_default(dev_ofnode(dev), "phy-reset-duration", 10);
 
+	if (ret == -ENOENT) {
+		/*
+		 * The generic ethernet-controller binding puts the PHY reset
+		 * on the mdio subnode instead, as reset-gpios/reset-delay-us.
+		 * That is what the Raspberry Pi 5 device tree uses.
+		 */
+		ofnode mdio = ofnode_find_subnode(dev_ofnode(dev), "mdio");
+
+		if (ofnode_valid(mdio) &&
+		    !gpio_request_by_name_nodev(mdio, "reset-gpios", 0,
+						&macb->phy_reset_gpio,
+						GPIOD_IS_OUT)) {
+			u32 us = ofnode_read_u32_default(mdio, "reset-delay-us",
+							 10000);
+
+			/* the reset helper sleeps in milliseconds */
+			macb->phy_reset_ms = DIV_ROUND_UP(us, 1000);
+		}
+	}
+
 	return macb_late_eth_of_to_plat(dev);
 }
 
@@ -1512,6 +1532,16 @@ static const struct udevice_id macb_eth_ids[] = {
 	{ .compatible = "cdns,zynq-gem" },
 	{ .compatible = "sifive,fu540-c000-gem",
 	  .data = (ulong)&sifive_config },
+	/*
+	 * The Raspberry Pi 5 GEM inside RP1.  The device tree lists
+	 * "raspberrypi,rp1-gem", "cdns,macb", so this would bind through the
+	 * fallback anyway; match it explicitly so the binding survives a
+	 * device tree that drops the fallback, and so the RP1 shows up by
+	 * name.  Linux gives it a richer config (dma_burst_length 16, jumbo,
+	 * PTP); deliberately not copied here, because plain cdns,macb
+	 * behaviour is what has actually been exercised on this hardware.
+	 */
+	{ .compatible = "raspberrypi,rp1-gem" },
 	{ }
 };
 

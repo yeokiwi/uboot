@@ -559,8 +559,14 @@ static void get_board_revision(void)
 		model = &models[rev_type];
 	}
 
-	if (IS_ENABLED(CONFIG_BOARD_TYPES))
-		gd->board_type = rev_type;
+#ifdef CONFIG_BOARD_TYPES
+	/*
+	 * Needs to be a preprocessor conditional, not IS_ENABLED(): the
+	 * board_type field only exists in struct global_data when
+	 * CONFIG_BOARD_TYPES is set.
+	 */
+	gd->board_type = rev_type;
+#endif
 
 	printf("RPI %s (0x%x)\n", model->name, revision);
 }
