@@ -30,12 +30,18 @@ CONFIG_CMD_MMC=y
 CONFIG_CMD_PCI=y
 CONFIG_CMD_USB=y
 CONFIG_CMD_SNTP=y
-CONFIG_WGET_HTTPS=y
 CONFIG_CMD_EFIDEBUG=y
 CONFIG_CMD_FS_UUID=y
 CONFIG_ENV_FAT_DEVICE_AND_PART="0:1"
 CONFIG_ENV_VARS_UBOOT_RUNTIME_CONFIG=y
-CONFIG_NET_LWIP=y
+
+# Deliberately no CONFIG_NET_LWIP: NETCONSOLE lives inside "if NET_LEGACY"
+# in net/Kconfig, so the network console is not even selectable on the lwIP
+# stack.  NET_LEGACY is the default arm of that choice, which is why there
+# is no CONFIG_NET_LEGACY=y line here - no defconfig in the tree writes one.
+# The one thing lost with lwIP is CONFIG_WGET_HTTPS (it depends on
+# PROT_TCP_LWIP); plain wget and EFI HTTP boot still work.
+
 CONFIG_DM_DMA=y
 CONFIG_DFU_MMC=y
 CONFIG_SYS_DFU_DATA_BUF_SIZE=0x100000
@@ -64,6 +70,8 @@ CONFIG_USB_KEYBOARD=y
 CONFIG_USB_HOST_ETHER=y
 CONFIG_USB_ETHER_LAN78XX=y
 CONFIG_USB_ETHER_SMSC95XX=y
+# Realtek RTL8152B/RTL8153A/RTL8153B, the usual USB gigabit dongle.
+CONFIG_USB_ETHER_RTL8152=y
 CONFIG_VIDEO=y
 # CONFIG_VIDEO_BPP8 is not set
 # CONFIG_VIDEO_BPP16 is not set
@@ -108,3 +116,23 @@ CONFIG_PHY_BROADCOM=y
 CONFIG_CMD_DHCP=y
 CONFIG_CMD_PING=y
 CONFIG_CMD_TFTPBOOT=y
+CONFIG_TFTP_TSIZE=y
+CONFIG_BOOTP_SEND_HOSTNAME=y
+
+# USB on the Raspberry Pi 5 is also behind the RP1: two DesignWare USB3
+# controllers ("snps,dwc3") on the same PCIe-endpoint bus as the GEM, both
+# marked okay by the firmware device tree.  xhci-dwc3 needs nothing else -
+# its reset, clock and PHY setup are all optional - and it gives a USB
+# Ethernet adapter somewhere to attach.  USB_XHCI_PCI stays for an xHCI
+# card in the M.2 slot.
+CONFIG_USB_XHCI_DWC3=y
+
+# Network console.  Requires the legacy stack; see the note above.
+CONFIG_NETCONSOLE=y
+
+# "clk dump" is step 3 of the Ethernet bring-up procedure in
+# doc/board/broadcom/raspberrypi-circle-net.rst, but CMD_CLK was never
+# enabled, so it failed as an unknown command.  (dm tree and mdio list, the
+# other two, already come in implicitly - CMD_DM defaults on and
+# BOOTSTD_DEFAULTS pulls CMD_MII, which implies CMD_MDIO.)
+CONFIG_CMD_CLK=y

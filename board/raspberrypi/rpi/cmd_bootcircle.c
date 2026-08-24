@@ -24,8 +24,10 @@
 #include <bootm.h>
 #include <command.h>
 #include <cpu_func.h>
+#include <env.h>
 #include <log.h>
 #include <mapmem.h>
+#include <net.h>
 #include <time.h>
 #include <vsprintf.h>
 #include <asm/arch/fw_mem.h>
@@ -259,6 +261,26 @@ static int do_bootcircle(struct cmd_tbl *cmdtp, int flag, int argc,
 	bootcircle_psci_report(selftest);
 
 	printf("Starting Circle at %#lx (DTB %#lx)\n", entry, dtb);
+
+	/*
+	 * NetConsole deliberately leaves the interface up between commands, and
+	 * bootm_final() does not take it down - only bootm_disable_interrupts()
+	 * does, and this command does not go through it.
+	 *
+	 * Put the console back on the serial port first.  bootm_final() removes
+	 * every active device, which frees the ethernet uclass private data
+	 * while the 'nc' stdio device is still in the console list and still
+	 * dereferencing it on every character.  Anything printed between here
+	 * and the jump - a firmware-restore warning, a driver remove error -
+	 * would land on freed memory.  It also puts the last words before the
+	 * hand-off where someone is looking.
+	 */
+	if (IS_ENABLED(CONFIG_NETCONSOLE)) {
+		env_set("stdin", "serial");
+		env_set("stdout", "serial");
+		env_set("stderr", "serial");
+		eth_halt();
+	}
 
 	bootm_final(0);
 

@@ -51,10 +51,7 @@
 	"circle_dev=mmc\0" \
 	"circle_part=0:1\0" \
 	"circle_full_hw=0\0" \
-	"circle_preboot=" \
-		"if test ${circle_full_hw} -eq 1; then " \
-			"pci enum; usb start; " \
-		"fi\0" \
+	CIRCLE_PREBOOT_ENV \
 	"circle_load=" \
 		"fatload ${circle_dev} ${circle_part} " \
 			"${circle_addr} ${circle_kernel}\0" \
@@ -65,25 +62,73 @@
 	CIRCLE_NET_ENV_SETTINGS
 
 /*
- * Ethernet on the Raspberry Pi 5 is a Cadence GEM inside RP1, behind PCIe,
- * so a network boot has to bring PCIe and RP1 up first.  Only offered where
- * the driver stack is actually built in - see rpi5_circle_net_defconfig.
+ * Networking.  Two interfaces are possible on a Raspberry Pi 5 and either can
+ * serve TFTP and the network console:
+ *
+ *   - the onboard MAC, a Cadence GEM inside the RP1 southbridge, which hangs
+ *     off PCIe, so a network boot has to bring PCIe and RP1 up first;
+ *   - a USB Ethernet adapter, which needs "usb start" and, on this board, the
+ *     RP1's DesignWare USB3 controllers.
+ *
+ * netdev names the one in use.  It is an interface number rather than a device
+ * name because the two drivers name their devices quite differently, and
+ * because "net list" - which is what tells you which is which - prints the
+ * numbers.  The onboard MAC binds during board_late_init() and so comes up as
+ * eth0 whenever it is present; a USB adapter binds later, at "usb start".
+ *
+ * Only offered where a driver stack is actually built in - see
+ * rpi5_circle_net_defconfig.
  */
-#ifdef CONFIG_MACB
+#if defined(CONFIG_MACB) || defined(CONFIG_USB_ETHER_RTL8152)
+
+#define CIRCLE_NET_PREBOOT	"; run circle_netpreboot"
+
 #define CIRCLE_NET_ENV_SETTINGS \
+	"autoload=no\0" \
+	"hostname=rpi5-uboot\0" \
+	"netdev=eth0\0" \
+	"net_pick=setenv ethrotate no; setenv ethact ${netdev}\0" \
+	"net_onboard=setenv netdev eth0; run net_pick\0" \
+	"net_usb=usb start; setenv netdev eth1; run net_pick\0" \
+	"net_up=run net_pick; dhcp\0" \
+	"nc_base=serial\0" \
+	"nc_on=setenv stdout ${nc_base},nc; setenv stderr ${nc_base},nc; " \
+		"setenv stdin ${nc_base},nc\0" \
+	"nc_off=setenv stdout ${nc_base}; setenv stderr ${nc_base}; " \
+		"setenv stdin ${nc_base}\0" \
+	"nc=run net_up; run nc_on\0" \
+	"circle_usbnet=0\0" \
+	"circle_netcon=0\0" \
+	"circle_netpreboot=" \
+		"if test ${circle_usbnet} -eq 1; then usb start; fi; " \
+		"if test ${circle_netcon} -eq 1; then run nc; fi\0" \
 	"circle_tftp=tftp ${circle_addr} ${circle_kernel}\0" \
 	"circle_netboot=" \
-		"if dhcp && run circle_tftp; then " \
+		"if run net_up && run circle_tftp; then " \
 			"bootcircle ${circle_addr}; " \
 		"fi\0" \
 	"circle_netcheck=" \
 		"echo '-- pci --'; pci enum; pci; " \
 		"echo '-- rp1 --'; dm tree; " \
+		"echo '-- clk --'; clk dump; " \
+		"echo '-- usb --'; usb start; usb tree; " \
 		"echo '-- mdio --'; mdio list; " \
 		"echo '-- eth --'; net list\0"
 #else
+#define CIRCLE_NET_PREBOOT	""
 #define CIRCLE_NET_ENV_SETTINGS
 #endif
+
+/*
+ * CIRCLE_NET_PREBOOT is a string literal, so it concatenates into the value.
+ * Without a network stack it is empty and circle_preboot is exactly what it
+ * always was - which matters, because "run" on an undefined variable fails.
+ */
+#define CIRCLE_PREBOOT_ENV \
+	"circle_preboot=" \
+		"if test ${circle_full_hw} -eq 1; then " \
+			"pci enum; usb start; " \
+		"fi" CIRCLE_NET_PREBOOT "\0"
 
 #endif
 

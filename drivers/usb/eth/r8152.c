@@ -1126,7 +1126,7 @@ static void r8152b_get_version(struct r8152 *tp)
 	}
 
 	if (tp->version == RTL_VER_UNKNOWN)
-		debug("r8152 Unknown tcr version 0x%04x\n", tcr);
+		printf("r8152: unknown chip, TCR version 0x%04x\n", tcr);
 }
 
 static void r8152b_enable_fc(struct r8152 *tp)
@@ -1375,7 +1375,7 @@ static int rtl_ops_init(struct r8152 *tp)
 
 	default:
 		ret = -ENODEV;
-		printf("r8152 Unknown Device\n");
+		printf("r8152: unsupported chip version %d\n", tp->version);
 		break;
 	}
 

@@ -36,6 +36,7 @@ There are two builds:
 - [Run](#run)
 - [The U-Boot prompt](#the-u-boot-prompt)
 - [Ethernet and TFTP](#ethernet-and-tftp)
+- [USB Ethernet and the network console](#usb-ethernet-and-the-network-console)
 - [Troubleshooting](#troubleshooting)
 - [Why multi-core needed fixing](#why-multi-core-needed-fixing)
 - [What was changed](#what-was-changed)
@@ -270,6 +271,8 @@ would then see `ALREADY_ON` for it.
 | `circle_full_hw` | `0` | `0` leaves the RP1, PCIe and framebuffer as the firmware left them. `1` runs `pci enum; usb start` at preboot for a USB keyboard and HDMI console in U-Boot |
 | `circle_load` | `fatload ...` | the load command |
 | `circle_boot` | `if run circle_load; then bootcircle ...; fi` | what `bootcmd` runs |
+| `circle_usbnet` | `0` | `1` runs `usb start` at preboot, so a USB Ethernet adapter is ready without a command (network build only) |
+| `circle_netcon` | `0` | `1` brings the network up and attaches the network console at preboot (network build only) |
 
 Turn on the full hardware bring-up:
 
@@ -293,7 +296,8 @@ U-Boot> saveenv
 ## Ethernet and TFTP
 
 Copying a new `kernel_2712.img` to the SD card for every build gets old fast.
-`rpi5_circle_net_defconfig` adds Ethernet so you can pull the image over TFTP:
+`rpi5_circle_net_defconfig` adds networking so you can pull the image over TFTP
+— and drive U-Boot itself over the network instead of a serial cable:
 
 ```bash
 make rpi5_circle_net_defconfig
@@ -307,9 +311,10 @@ U-Boot> setenv serverip 192.168.1.10
 U-Boot> run circle_netboot
 ```
 
-`run circle_netcheck` walks the whole chain (`pci`, `dm tree`, `mdio list`,
-`net list`) in one command, which is what you want the first time you bring it
-up. The layer-by-layer procedure is in
+`run circle_netcheck` walks the whole chain (`pci`, `dm tree`, `clk dump`,
+`usb tree`, `mdio list`, `net list`) in one command, which is what you want the
+first time you bring it up. The layer-by-layer procedure, and a table of
+failure signatures, are in
 [`raspberrypi-circle-net.rst`](doc/board/broadcom/raspberrypi-circle-net.rst).
 
 ### What this actually required
@@ -341,6 +346,63 @@ deliberately leaves the hardware as the firmware left it, which is the state
 Circle is known to work from. Keeping them separate makes that an explicit
 choice and leaves a known-good fallback. Both builds get the multi-core fix and
 the firmware restore.
+
+The network build also uses the **legacy** U-Boot network stack rather than
+lwIP, because `CONFIG_NETCONSOLE` exists only there. The only casualty is
+`wget https`, whose TLS glue is written against lwIP's TCP; plain `wget` and
+EFI HTTP boot still work.
+
+---
+
+## USB Ethernet and the network console
+
+The Pi 5 can use either of two interfaces, and either one can do TFTP and the
+network console:
+
+| | Interface | Brought up by |
+|---|---|---|
+| `eth0` | onboard MAC (Cadence GEM in RP1) | automatically |
+| `eth1` | USB adapter (RTL8152B/8153A/8153B) | `usb start` |
+
+`netdev` picks one and everything follows it:
+
+```
+U-Boot> run net_onboard          # netdev=eth0
+U-Boot> run net_usb              # usb start, then netdev=eth1
+U-Boot> net list                 # which is which, and which is active
+```
+
+USB works because RP1's two USB host controllers are ordinary DesignWare USB3
+cores sitting on the same PCIe-endpoint bus as the Ethernet MAC, so
+`CONFIG_USB_XHCI_DWC3` binds them without new code. The Realtek driver was
+already in the tree, unused by any Pi config.
+
+### Network console
+
+`CONFIG_NETCONSOLE` carries the U-Boot console over UDP, in both directions, on
+whichever interface `netdev` selects:
+
+```
+U-Boot> run net_usb              # or: run net_onboard
+U-Boot> setenv ncip 192.168.1.10 # your host; leave unset to broadcast
+U-Boot> run nc
+```
+
+and on the host, `tools/netconsole <board-ip>`. `run nc_off` puts it back.
+
+`nc_on` *adds* `nc` to the existing console rather than replacing it, so the
+serial port keeps working and a wrong `ncip` is not a lockout. To start it on
+every boot, set `circle_netcon=1` and `saveenv` — don't put `nc` in `stdout`
+directly, because the console is assigned long before any network device
+exists and the output would go nowhere.
+
+Full details, including how to switch interfaces cleanly while netconsole is
+attached, are in
+[`raspberrypi-circle-net.rst`](doc/board/broadcom/raspberrypi-circle-net.rst).
+
+**RTL8156 and other 2.5GbE adapters are not supported** — the driver has
+neither their USB IDs nor their chip-version handling. The symptom is an
+adapter that shows up in `usb tree` and is absent from `net list`.
 
 ---
 
@@ -438,6 +500,16 @@ with original authorship preserved, then adapted:
 | Network configuration | `configs/rpi5_circle_net_defconfig` |
 | Ethernet documentation | `doc/board/broadcom/raspberrypi-circle-net.rst` |
 
+USB Ethernet and the network console — no new drivers were needed, only
+configuration and glue:
+
+| Change | File |
+|---|---|
+| Legacy net stack, `NETCONSOLE`, `USB_ETHER_RTL8152`, `USB_XHCI_DWC3`, `CMD_CLK` | `configs/rpi5_circle_net_defconfig` |
+| `netdev` interface selection, `nc_*` scripts, `circle_netpreboot` hook | `include/configs/rpi.h` |
+| Detach the network console and halt the NIC before handing over | `board/raspberrypi/rpi/cmd_bootcircle.c` |
+| Name the unsupported chip instead of "Unknown Device" | `drivers/usb/eth/r8152.c` |
+
 ### The hand-off `bootcircle` performs
 
 Neither `booti` nor `go` can start a Circle image: `booti` rejects it for
@@ -477,6 +549,11 @@ Done in CI-equivalent conditions:
   `RP1_CLK_ETH_TSU`
 - All RP1 drivers confirmed linked and registered (`clk_rp1`, `rp1_driver`,
   `rp1_gpio`, `eth_macb`, `pcie_brcm_base`)
+- USB Ethernet and netconsole: `r8152_eth` (with its USB id table),
+  `xhci_dwc3` and `drv_nc_init` confirmed linked and registered, and the
+  `net_*`/`nc_*` environment confirmed present in `u-boot.bin`
+- `make savedefconfig` on the network build round-trips: every symbol added is
+  load-bearing, and none was silently dropped by the lwIP → legacy switch
 
 Not done:
 
@@ -489,6 +566,15 @@ Not done:
 - The RP1 Ethernet stack is an unmerged RFC adapted to a device tree it was not
   written against. It is the least proven part of this tree — bring it up with
   `run circle_netcheck` and the layer-by-layer procedure in the Ethernet doc.
+- **RP1 USB has never run under U-Boot.** The controllers need no clock, reset
+  or PHY properties, so no code had to be written for them — but that also
+  means U-Boot leaves them exactly as the firmware's own USB boot scan did, and
+  the USB-3 ports' VBUS pinmux is not applied because the RP1 GPIO driver has
+  no pinctrl support. If an adapter is not detected, try the USB-2 ports.
+- The USB adapter is assumed to be `eth1`, which holds whenever the onboard MAC
+  is also present, but the firmware device tree has no `ethernet0` alias, so
+  the numbering is bind order rather than a guarantee. `net list` is the ground
+  truth.
 
 ---
 
