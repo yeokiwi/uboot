@@ -302,6 +302,131 @@ static u16 sram_read(struct r8152 *tp, u16 addr)
 	return ocp_reg_read(tp, OCP_SRAM_DATA);
 }
 
+static void
+ocp_dword_w0w1(struct r8152 *tp, u16 type, u16 index, u32 clear, u32 set)
+{
+	u32 ocp_data;
+
+	ocp_data = ocp_read_dword(tp, type, index);
+	ocp_data = (ocp_data & ~clear) | set;
+	ocp_write_dword(tp, type, index, ocp_data);
+}
+
+static void
+ocp_word_w0w1(struct r8152 *tp, u16 type, u16 index, u16 clear, u16 set)
+{
+	u32 ocp_data;
+
+	ocp_data = ocp_read_word(tp, type, index);
+	ocp_data = (ocp_data & ~clear) | set;
+	ocp_write_word(tp, type, index, ocp_data);
+}
+
+static void
+ocp_byte_w0w1(struct r8152 *tp, u16 type, u16 index, u8 clear, u8 set)
+{
+	u32 ocp_data;
+
+	ocp_data = ocp_read_byte(tp, type, index);
+	ocp_data = (ocp_data & ~clear) | set;
+	ocp_write_byte(tp, type, index, ocp_data);
+}
+
+static void
+ocp_dword_clr_bits(struct r8152 *tp, u16 type, u16 index, u32 clear)
+{
+	ocp_dword_w0w1(tp, type, index, clear, 0);
+}
+
+static void
+ocp_dword_set_bits(struct r8152 *tp, u16 type, u16 index, u32 set)
+{
+	ocp_dword_w0w1(tp, type, index, 0, set);
+}
+
+static void
+ocp_word_clr_bits(struct r8152 *tp, u16 type, u16 index, u16 clear)
+{
+	ocp_word_w0w1(tp, type, index, clear, 0);
+}
+
+void
+ocp_word_set_bits(struct r8152 *tp, u16 type, u16 index, u16 set)
+{
+	ocp_word_w0w1(tp, type, index, 0, set);
+}
+
+static void
+ocp_word_test_and_clr_bits(struct r8152 *tp, u16 type, u16 index, u16 clear)
+{
+	u32 ocp_data;
+
+	ocp_data = ocp_read_word(tp, type, index);
+	if (ocp_data & clear)
+		ocp_write_word(tp, type, index, ocp_data & ~clear);
+}
+
+static void
+ocp_byte_clr_bits(struct r8152 *tp, u16 type, u16 index, u8 clear)
+{
+	ocp_byte_w0w1(tp, type, index, clear, 0);
+}
+
+static void
+ocp_byte_set_bits(struct r8152 *tp, u16 type, u16 index, u8 set)
+{
+	ocp_byte_w0w1(tp, type, index, 0, set);
+}
+
+static void ocp_reg_w0w1(struct r8152 *tp, u16 addr, u16 clear, u16 set)
+{
+	u16 data;
+
+	data = ocp_reg_read(tp, addr);
+	data = (data & ~clear) | set;
+	ocp_reg_write(tp, addr, data);
+}
+
+void ocp_reg_clr_bits(struct r8152 *tp, u16 addr, u16 clear)
+{
+	ocp_reg_w0w1(tp, addr, clear, 0);
+}
+
+void ocp_reg_set_bits(struct r8152 *tp, u16 addr, u16 set)
+{
+	ocp_reg_w0w1(tp, addr, 0, set);
+}
+
+static void sram_write_w0w1(struct r8152 *tp, u16 addr, u16 clear, u16 set)
+{
+	u16 data;
+
+	data = sram_read(tp, addr);
+	data = (data & ~clear) | set;
+	ocp_reg_write(tp, OCP_SRAM_DATA, data);
+}
+
+static void sram_set_bits(struct r8152 *tp, u16 addr, u16 set)
+{
+	return sram_write_w0w1(tp, addr, 0, set);
+}
+
+static void sram_clr_bits(struct r8152 *tp, u16 addr, u16 clear)
+{
+	return sram_write_w0w1(tp, addr, clear, 0);
+}
+
+static void r8152_mdio_test_and_clr_bit(struct r8152 *tp, u16 addr, u16 clear)
+{
+	u16 data;
+
+	data = r8152_mdio_read(tp, addr);
+	if (data & clear) {
+		data &= ~clear;
+		r8152_mdio_write(tp, addr, data);
+	}
+}
+
 int r8152_wait_for_bit(struct r8152 *tp, bool ocp_reg, u16 type, u16 index,
 		       const u32 mask, bool set, unsigned int timeout)
 {
