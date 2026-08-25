@@ -2103,7 +2103,7 @@ static int rtl8152_set_speed(struct r8152 *tp, u8 autoneg, u16 speed, u8 duplex)
 				anar |= ADVERTISE_10HALF | ADVERTISE_10FULL;
 				anar |= ADVERTISE_100HALF | ADVERTISE_100FULL;
 				gbcr |= ADVERTISE_1000FULL | ADVERTISE_1000HALF;
-				gbcr2|= MDIO_AN_10GBT_CTRL_ADV2_5G;
+				gbcr2 |= MDIO_AN_10GBT_CTRL_ADV2_5G;
 			} else {
 				anar |= ADVERTISE_10HALF;
 				anar |= ADVERTISE_100HALF;

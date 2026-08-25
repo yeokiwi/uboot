@@ -199,17 +199,33 @@ memory - across the jump into Circle.
 USB Ethernet adapters
 ---------------------
 
-``CONFIG_USB_ETHER_RTL8152`` covers the Realtek parts found in most cheap USB
-gigabit dongles: **RTL8152B, RTL8153A and RTL8153B**.
+``CONFIG_USB_ETHER_RTL8152`` covers the Realtek parts found in most USB
+Ethernet dongles:
 
-**RTL8156 and RTL8156B - the 2.5GbE parts in newer adapters - are not
-supported.**  The driver has neither their USB IDs nor their chip-version
-handling, so such an adapter binds to nothing at all: it appears in ``usb
-tree`` and is simply absent from ``net list``.  If an adapter's USB ID *is*
-known but its silicon revision is not, the driver says so::
+============================  ==================  ========
+Chip                          Chip version        Speed
+============================  ==================  ========
+RTL8152B                      1, 2, 7             100M
+RTL8153A                      3, 4, 5, 6          1G
+RTL8153B                      8, 9                1G
+RTL8153C                      14                  1G
+RTL8156 / RTL8156A            10, 11              2.5G
+RTL8156B / RTL8156BG          12, 13, 15          2.5G
+============================  ==================  ========
+
+The 2.5GbE parts share one USB product ID, ``0bda:8156`` (some are
+``0bda:8155``), and the driver picks them apart by reading the chip version
+register - so the same entry covers RTL8156, 8156A, 8156B and 8156BG.  Where
+the link partner is only gigabit, autonegotiation settles on gigabit.
+
+If an adapter's USB ID is known but its silicon revision is not, the driver
+says which::
 
    r8152: unknown chip, TCR version 0x....
    r8152: unsupported chip version 0
+
+That is what a part newer than this driver looks like: present in ``usb tree``,
+absent from ``net list``.
 
 Bringing it up the first time
 -----------------------------
@@ -314,5 +330,8 @@ Known limitations
   the firmware has usually powered the ports already, but if an adapter is not
   detected on one pair of ports try the other - the USB-2 pair has no such
   dependency.
-* Only RTL8152B/RTL8153A/RTL8153B USB adapters are supported; RTL8156 and other
-  2.5GbE parts are not.
+* RTL8156 support comes from an **unmerged** vendor patch series (ChunHao Lin,
+  Realtek, u-boot list, November 2024, "usb: eth: r8152: support more chips").
+  It is not in any U-Boot release, and it has not been run against a 2.5GbE
+  adapter here - see the verification note in the top-level ``README.md``.
+* RTL8157 (5G) is patch 5/5 of that series and is not carried here.

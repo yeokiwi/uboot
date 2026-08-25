@@ -48,12 +48,13 @@ config USB_ETHER_MCS7830
 	  (7730/7830/7832) USB 2.0 Ethernet Devices.
 
 config USB_ETHER_RTL8152
-	bool "Realtek RTL8152B/RTL8153 support"
+	bool "Realtek RTL8152B/RTL8153/RTL8156 support"
 	depends on USB_HOST_ETHER
 	---help---
-	  Say Y here if you would like to support Realtek RTL8152B/RTL8153 base
-	  USB Ethernet Devices. This driver also supports compatible devices
-	  from Samsung, Lenovo, TP-LINK and Nvidia.
+	  Say Y here if you would like to support Realtek RTL8152B, RTL8153,
+	  RTL8153C and RTL8156/RTL8156B based USB Ethernet Devices. The
+	  RTL8156 parts are 2.5GbE. This driver also supports compatible
+	  devices from Samsung, Lenovo, TP-LINK and Nvidia.
 
 config USB_ETHER_SMSC95XX
 	bool "SMSC LAN95x support"

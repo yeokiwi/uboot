@@ -400,9 +400,30 @@ Full details, including how to switch interfaces cleanly while netconsole is
 attached, are in
 [`raspberrypi-circle-net.rst`](doc/board/broadcom/raspberrypi-circle-net.rst).
 
-**RTL8156 and other 2.5GbE adapters are not supported** — the driver has
-neither their USB IDs nor their chip-version handling. The symptom is an
-adapter that shows up in `usb tree` and is absent from `net list`.
+### Which adapters work
+
+| Chip | Chip version | Speed |
+|---|---|---|
+| RTL8152B | 1, 2, 7 | 100M |
+| RTL8153A | 3, 4, 5, 6 | 1G |
+| RTL8153B | 8, 9 | 1G |
+| RTL8153C | 14 | 1G |
+| RTL8156 / RTL8156A | 10, 11 | 2.5G |
+| RTL8156B / RTL8156BG | 12, 13, 15 | 2.5G |
+
+The 2.5GbE parts all share the USB product ID `0bda:8156` (some `0bda:8155`);
+the driver reads the chip-version register to tell them apart. A chip newer
+than the driver shows up in `usb tree` and is absent from `net list`, and says
+which version it is:
+
+```
+r8152: unknown chip, TCR version 0x....
+r8152: unsupported chip version 0
+```
+
+RTL8156 support is an **unmerged vendor patch series** (ChunHao Lin, Realtek,
+u-boot list, Nov 2024) carried here with authorship preserved — it is in no
+U-Boot release. RTL8157 (5G) is patch 5/5 of that series and is not carried.
 
 ---
 
@@ -510,6 +531,17 @@ configuration and glue:
 | Detach the network console and halt the NIC before handing over | `board/raspberrypi/rpi/cmd_bootcircle.c` |
 | Name the unsupported chip instead of "Unknown Device" | `drivers/usb/eth/r8152.c` |
 
+RTL8156/RTL8156B (2.5GbE) and RTL8153C — carried from ChunHao Lin's unmerged
+[vendor series](https://lists.denx.de/pipermail/u-boot/2024-November/572954.html)
+with original authorship preserved:
+
+| Change | File |
+|---|---|
+| Bit-manipulation helpers (patch 1/5) | `drivers/usb/eth/r8152.c` |
+| RTL8156/RTL8156B support, 2.5G speed path (patch 2/5) | `drivers/usb/eth/r8152.{c,h}`, `r8152_fw.c` |
+| RTL8153C support (patch 3/5) | `drivers/usb/eth/r8152.{c,h}`, `r8152_fw.c` |
+| Kconfig prompt and help text | `drivers/usb/eth/Kconfig` |
+
 ### The hand-off `bootcircle` performs
 
 Neither `booti` nor `go` can start a Circle image: `booti` rejects it for
@@ -554,6 +586,19 @@ Done in CI-equivalent conditions:
   `net_*`/`nc_*` environment confirmed present in `u-boot.bin`
 - `make savedefconfig` on the network build round-trips: every symbol added is
   load-bearing, and none was silently dropped by the lwIP → legacy switch
+- The RTL8156 vendor series was verified by **git blob hash at every step**: the
+  base `r8152.c` is `e3f20e08c3`, and applying 1/5 → 2/5 → 3/5 reproduces
+  `294f7d776e` → `c767b78291` → `8ddfb402d8` exactly, matching the `index`
+  lines the patches themselves declare, for all three files touched. Patch 1/5
+  had to be reconstructed from a PDF that lost tab indentation; the hash match
+  proves the reconstruction is byte-identical to the original
+- `r8156_init`, `r8156b_init`, `rtl8156_up/down/enable/disable`, `r8153c_init`
+  and `r8153c_firmware` confirmed linked, and `0bda:8156`/`0bda:8155` confirmed
+  present in the USB id table in `u-boot.bin`
+- `rock5b-rk3588` and `imx8mp_venice` — two of the 71 non-Pi boards that enable
+  this driver — compile `r8152.o`/`r8152_fw.o` and link `u-boot` cleanly; their
+  builds stop later at binman for want of vendor blobs (rockchip-tpl, ATF, DDR
+  firmware, OP-TEE), which is unrelated to this change and equally true before it
 
 Not done:
 
@@ -575,6 +620,11 @@ Not done:
   is also present, but the firmware device tree has no `ethernet0` alias, so
   the numbering is bind order rather than a guarantee. `net list` is the ground
   truth.
+- **The 2.5GbE support has never seen an RTL8156.** It is a vendor patch series
+  that was posted to the U-Boot list and never merged, applied here unmodified.
+  Nothing in it has run against silicon in this tree, and the `r8156_hw_phy_cfg`
+  register sequences cannot be verified by reading. Treat first bring-up as
+  genuinely unproven, and use `run circle_netcheck` for it.
 
 ---
 
