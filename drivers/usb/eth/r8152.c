@@ -40,6 +40,7 @@ static const struct r8152_version r8152_versions[] = {
 	{ 0x7030, RTL_VER_11, 1, 1},
 	{ 0x7400, RTL_VER_12, 1, 1},
 	{ 0x7410, RTL_VER_13, 1, 1},
+	{ 0x6400, RTL_VER_14, 1, 0},
 	{ 0x7420, RTL_VER_15, 1, 1},
 };
 
@@ -632,6 +633,7 @@ static void r8153_set_rx_early_timeout(struct r8152 *tp)
 
 	case RTL_VER_08:
 	case RTL_VER_09:
+	case RTL_VER_14:
 		/* The RTL8153B uses USB_RX_EXTRA_AGGR_TMR for rx timeout
 		 * primarily. For USB_RX_EARLY_TIMEOUT, we fix it to 1264ns.
 		 */
@@ -679,6 +681,7 @@ static void r8153_set_rx_early_size(struct r8152 *tp)
 	case RTL_VER_11:
 	case RTL_VER_12:
 	case RTL_VER_13:
+	case RTL_VER_14:
 	case RTL_VER_15:
 		ocp_write_word(tp, MCU_TYPE_USB, USB_RX_EARLY_SIZE,
 			       ocp_data / 8);
@@ -695,6 +698,18 @@ static int rtl8153_enable(struct r8152 *tp)
 	rtl_set_eee_plus(tp);
 	r8153_set_rx_early_timeout(tp);
 	r8153_set_rx_early_size(tp);
+
+	switch (tp->version) {
+	case RTL_VER_14:
+		ocp_word_clr_bits(tp, MCU_TYPE_USB, USB_FW_TASK,
+				  FC_PATCH_TASK);
+		mdelay(2);
+		ocp_word_set_bits(tp, MCU_TYPE_USB, USB_FW_TASK,
+				  FC_PATCH_TASK);
+		break;
+	default:
+		break;
+	}
 
 	return rtl_enable(tp);
 }
@@ -774,6 +789,7 @@ static void rtl_rx_vlan_en(struct r8152 *tp, bool enable)
 	case RTL_VER_07:
 	case RTL_VER_08:
 	case RTL_VER_09:
+	case RTL_VER_14:
 		if (enable)
 			ocp_word_set_bits(tp, MCU_TYPE_PLA, PLA_CPCR,
 					  CPCR_RX_VLAN);
@@ -950,6 +966,7 @@ static void r8153_teredo_off(struct r8152 *tp)
 	case RTL_VER_11:
 	case RTL_VER_12:
 	case RTL_VER_13:
+	case RTL_VER_14:
 	case RTL_VER_15:
 	default:
 		/* The bit 0 ~ 7 are relative with teredo settings. They are
@@ -1277,7 +1294,10 @@ static void r8153b_hw_phy_cfg(struct r8152 *tp)
 	/* U1/U2/L1 idle timer. 500 us */
 	ocp_write_word(tp, MCU_TYPE_USB, USB_U1U2_TIMER, 500);
 
-	r8153b_firmware(tp);
+	if (tp->version == RTL_VER_14)
+		r8153c_firmware(tp);
+	else
+		r8153b_firmware(tp);
 
 	data = sram_read(tp, SRAM_GREEN_CFG);
 	data |= R_TUNE_EN;
@@ -1846,11 +1866,21 @@ static void r8153_first_init(struct r8152 *tp)
 	rtl8152_nic_reset(tp);
 
 	/* rx share fifo credit full threshold */
-	ocp_write_dword(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL0, RXFIFO_THR1_NORMAL);
-	ocp_write_word(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL1, RXFIFO_THR2_NORMAL);
-	ocp_write_word(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL2, RXFIFO_THR3_NORMAL);
-	/* TX share fifo free credit full threshold */
-	ocp_write_dword(tp, MCU_TYPE_PLA, PLA_TXFIFO_CTRL, TXFIFO_THR_NORMAL2);
+	if (tp->version == RTL_VER_14) {
+		ocp_write_byte(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL0, 0x02);
+		ocp_write_byte(tp, MCU_TYPE_PLA, PLA_RXFIFO_FULL, 0x08);
+		ocp_write_word(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL1, RXFIFO_THR2_NORMAL);
+		ocp_write_word(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL2, RXFIFO_THR3_NORMAL);
+		/* TX share fifo free credit full threshold */
+		ocp_write_word(tp, MCU_TYPE_PLA, PLA_TXFIFO_CTRL, 512 / 64);
+		ocp_write_word(tp, MCU_TYPE_PLA, PLA_TXFIFO_FULL, 2048 / 8);
+	} else {
+		ocp_write_dword(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL0, RXFIFO_THR1_NORMAL);
+		ocp_write_word(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL1, RXFIFO_THR2_NORMAL);
+		ocp_write_word(tp, MCU_TYPE_PLA, PLA_RXFIFO_CTRL2, RXFIFO_THR3_NORMAL);
+		/* TX share fifo free credit full threshold */
+		ocp_write_dword(tp, MCU_TYPE_PLA, PLA_TXFIFO_CTRL, TXFIFO_THR_NORMAL2);
+	}
 
 	/* rx aggregation */
 	ocp_data = ocp_read_word(tp, MCU_TYPE_USB, USB_USB_CTRL);
@@ -2140,6 +2170,15 @@ static void rtl8153b_down(struct r8152 *tp)
 	r8153_enter_oob(tp);
 }
 
+static void rtl8153c_up(struct r8152 *tp)
+{
+	ocp_write_byte(tp, MCU_TYPE_PLA, PLA_CRWECR, CRWECR_CONFIG);
+	ocp_word_set_bits(tp, MCU_TYPE_PLA, PLA_CONFIG34, BIT(8));
+	ocp_write_byte(tp, MCU_TYPE_PLA, PLA_CRWECR, CRWECR_NORAML);
+
+	rtl8153b_up(tp);
+}
+
 static void rtl8156_up(struct r8152 *tp)
 {
 	r8156_exit_oob(tp);
@@ -2373,6 +2412,13 @@ static void r8153b_init(struct r8152 *tp)
 	r8152b_enable_fc(tp);
 }
 
+static void r8153c_init(struct r8152 *tp)
+{
+	ocp_byte_clr_bits(tp, MCU_TYPE_USB, USB_MISC_2, BIT(7));
+
+	r8153b_init(tp);
+}
+
 static void r8156_init(struct r8152 *tp)
 {
 	u32 ocp_data;
@@ -2560,6 +2606,14 @@ static int rtl_ops_init(struct r8152 *tp)
 		ops->disable		= rtl8156_disable;
 		ops->up			= rtl8156_up;
 		ops->down		= rtl8156_down;
+		break;
+
+	case RTL_VER_14:
+		ops->init		= r8153c_init;
+		ops->enable		= rtl8153_enable;
+		ops->disable		= rtl8153_disable;
+		ops->up			= rtl8153c_up;
+		ops->down		= rtl8153b_down;
 		break;
 
 	default:

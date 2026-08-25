@@ -79,6 +79,15 @@
 #define PLA_BP_6		0xfc34
 #define PLA_BP_7		0xfc36
 #define PLA_BP_EN		0xfc38
+#define PLA_BP_8		0xfc38		/* RTL8153C */
+#define PLA_BP_9		0xfc3a
+#define PLA_BP_10		0xfc3c
+#define PLA_BP_11		0xfc3e
+#define PLA_BP_12		0xfc40
+#define PLA_BP_13		0xfc42
+#define PLA_BP_14		0xfc44
+#define PLA_BP_15		0xfc46
+#define PLA_BP2_EN		0xfc48
 
 #define USB_USB2PHY		0xb41e
 #define USB_SSPHYLINK2		0xb428
@@ -95,6 +104,7 @@
 #define USB_FW_USB_VER		0xcfd7
 #define USB_LPM_CONFIG		0xcfd8
 #define USB_ECM_OPTION		0xcfee
+#define USB_MISC_2		0xcfff
 #define USB_ECM_OP		0xd26b
 #define USB_GPHY_CTRL		0xd284
 #define USB_SPEED_OPTION	0xd32a
@@ -744,7 +754,7 @@ enum rtl_version {
 	RTL_VER_11,
 	RTL_VER_12,
 	RTL_VER_13,
-	//RTL_VER_14,
+	RTL_VER_14,
 	RTL_VER_15,
 
 	RTL_VER_MAX
@@ -829,6 +839,7 @@ void rtl_reset_ocp_base(struct r8152 *tp);
 void r8152b_firmware(struct r8152 *tp);
 void r8153_firmware(struct r8152 *tp);
 void r8153b_firmware(struct r8152 *tp);
+void r8153c_firmware(struct r8152 *tp);
 void r8156_ram_code(struct r8152 *tp, bool power_cut);
 
 void r8156_patch_code(struct r8152 *tp);
