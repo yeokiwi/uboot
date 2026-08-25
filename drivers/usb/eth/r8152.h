@@ -12,10 +12,14 @@
 
 #define PLA_IDR			0xc000
 #define PLA_RCR			0xc010
+#define PLA_RCR1		0xc012
 #define PLA_RMS			0xc016
 #define PLA_RXFIFO_CTRL0	0xc0a0
+#define PLA_RXFIFO_FULL		0xc0a2
 #define PLA_RXFIFO_CTRL1	0xc0a4
+#define PLA_RX_FIFO_FULL	0xc0a6
 #define PLA_RXFIFO_CTRL2	0xc0a8
+#define PLA_RX_FIFO_EMPTY	0xc0aa
 #define PLA_DMY_REG0		0xc0b0
 #define PLA_FMC			0xc0b4
 #define PLA_CFG_WOL		0xc0b6
@@ -26,6 +30,8 @@
 #define PLA_TEREDO_TIMER	0xd2cc
 #define PLA_REALWOW_TIMER	0xd2e8
 #define PLA_EXTRA_STATUS	0xd398
+#define PLA_GPHY_CTRL		0xd3ae
+#define PLA_POL_GPIO_CTRL	0xdc6a
 #define PLA_EFUSE_DATA		0xdd00
 #define PLA_EFUSE_CMD		0xdd02
 #define PLA_LEDSEL		0xdd90
@@ -34,6 +40,7 @@
 #define PLA_BOOT_CTRL		0xe004
 #define PLA_GPHY_INTR_IMR	0xe022
 #define PLA_EEE_CR		0xe040
+#define PLA_EEE_TXTWSYS_2P5G	0xe058
 #define PLA_EEEP_CR		0xe080
 #define PLA_MAC_PWR_CTRL	0xe0c0
 #define PLA_MAC_PWR_CTRL2	0xe0ca
@@ -44,6 +51,7 @@
 #define PLA_TCR1		0xe612
 #define PLA_MTPS		0xe615
 #define PLA_TXFIFO_CTRL		0xe618
+#define PLA_TXFIFO_FULL		0xe61a
 #define PLA_RSTTALLY		0xe800
 #define BIST_CTRL		0xe810
 #define PLA_CR			0xe813
@@ -60,6 +68,7 @@
 #define PLA_TALLYCNT		0xe890
 #define PLA_SFF_STS_7		0xe8de
 #define PLA_PHYSTATUS		0xe908
+#define PLA_USB_CFG		0xe952
 #define PLA_BP_BA		0xfc26
 #define PLA_BP_0		0xfc28
 #define PLA_BP_1		0xfc2a
@@ -79,9 +88,19 @@
 #define USB_DEV_STAT		0xb808
 #define USB_CONNECT_TIMER	0xcbf8
 #define USB_MSC_TIMER		0xcbfc
+#define USB_OUTER_FW_VER	0xcd54
 #define USB_BURST_SIZE		0xcfc0
 #define USB_FW_FIX_EN1		0xcfcc
+#define USB_FW_PLA_VER		0xcfd6
+#define USB_FW_USB_VER		0xcfd7
 #define USB_LPM_CONFIG		0xcfd8
+#define USB_ECM_OPTION		0xcfee
+#define USB_ECM_OP		0xd26b
+#define USB_GPHY_CTRL		0xd284
+#define USB_SPEED_OPTION	0xd32a
+#define USB_FW_CTRL		0xd334	/* RTL8153B */
+#define USB_FC_TIMER		0xd340
+#define USB_OUTSIDE_FW_VER	0xd3cc
 #define USB_USB_CTRL		0xd406
 #define USB_PHY_CTRL		0xd408
 #define USB_TX_AGG		0xd40a
@@ -93,10 +112,13 @@
 #define USB_RX_EXTRA_AGGR_TMR	0xd432	/* RTL8153B */
 #define USB_TX_DMA		0xd434
 #define USB_UPT_RXDMA_OWN	0xd437
+#define USB_UPHY3_MDCMDIO	0xd480
 #define USB_TOLERANCE		0xd490
 #define USB_LPM_CTRL		0xd41a
 #define USB_BMU_RESET		0xd4b0
+#define USB_BMU_CONFIG		0xd4b4
 #define USB_U1U2_TIMER		0xd4da
+#define USB_FW_TASK		0xd4e8	/* RTL8153B */
 #define USB_UPS_CTRL		0xd800
 #define USB_POWER_CUT		0xd80a
 #define USB_MISC_0		0xd81a
@@ -105,7 +127,23 @@
 #define USB_WDT11_CTRL		0xe43c
 #define USB_BP_BA		PLA_BP_BA
 #define USB_BP(n)		(0xfc28 + 2 * (n))
+#define USB_BP_0		PLA_BP_0
+#define USB_BP_1		PLA_BP_1
+#define USB_BP_2		PLA_BP_2
+#define USB_BP_3		PLA_BP_3
+#define USB_BP_4		PLA_BP_4
+#define USB_BP_5		PLA_BP_5
+#define USB_BP_6		PLA_BP_6
+#define USB_BP_7		PLA_BP_7
 #define USB_BP_EN		PLA_BP_EN	/* RTL8153A */
+#define USB_BP_8		0xfc38		/* RTL8153B */
+#define USB_BP_9		0xfc3a
+#define USB_BP_10		0xfc3c
+#define USB_BP_11		0xfc3e
+#define USB_BP_12		0xfc40
+#define USB_BP_13		0xfc42
+#define USB_BP_14		0xfc44
+#define USB_BP_15		0xfc46
 #define USB_BP2_EN		0xfc48
 
 /* OCP Registers */
@@ -117,6 +155,7 @@
 #define OCP_EEE_AR		0xa41a
 #define OCP_EEE_DATA		0xa41c
 #define OCP_PHY_STATUS		0xa420
+#define OCP_INTR_EN		0xa424
 #define OCP_NCTL_CFG		0xa42c
 #define OCP_POWER_CFG		0xa430
 #define OCP_EEE_CFG		0xa432
@@ -126,16 +165,24 @@
 #define OCP_EEE_ABLE		0xa5c4
 #define OCP_EEE_ADV		0xa5d0
 #define OCP_EEE_LPABLE		0xa5d2
+#define OCP_10GBT_CTRL		0xa5d4
+#define OCP_EEE_ADV2		0xa6d4
 #define OCP_PHY_STATE		0xa708		/* nway state for 8153 */
+#define OCP_PHY_PATCH_STAT	0xb800
+#define OCP_PHY_PATCH_CMD	0xb820
+#define OCP_PHY_LOCK		0xb82e
 #define OCP_ADC_IOFFSET		0xbcfc
 #define OCP_ADC_CFG		0xbc06
+#define OCP_SYSCLK_CFG		0xc416
 
 /* SRAM Register */
 #define SRAM_GREEN_CFG		0x8011
 #define SRAM_LPF_CFG		0x8012
+#define SRAM_GPHY_FW_VER	0x801e
 #define SRAM_10M_AMP1		0x8080
 #define SRAM_10M_AMP2		0x8082
 #define SRAM_IMPEDANCE		0x8084
+#define SRAM_PHY_LOCK		0xb82e
 
 /* PLA_RCR */
 #define RCR_AAP			0x00000001
@@ -143,10 +190,18 @@
 #define RCR_AM			0x00000004
 #define RCR_AB			0x00000008
 #define RCR_ACPT_ALL		(RCR_AAP | RCR_APM | RCR_AM | RCR_AB)
+#define SLOT_EN			BIT(11)
+
+/* PLA_RCR1 */
+#define OUTER_VLAN		BIT(7)
+#define INNER_VLAN		BIT(6)
 
 /* PLA_RXFIFO_CTRL0 */
 #define RXFIFO_THR1_NORMAL	0x00080002
 #define RXFIFO_THR1_OOB		0x01800003
+
+/* PLA_RXFIFO_FULL */
+#define RXFIFO_FULL_MASK	0xfff
 
 /* PLA_RXFIFO_CTRL1 */
 #define RXFIFO_THR2_FULL	0x00000060
@@ -195,9 +250,6 @@
 #define PLA_CR_RE		0x08
 #define PLA_CR_TE		0x04
 
-/* PLA_BIST_CTRL */
-#define BIST_CTRL_SW_RESET (0x10 << 24)
-
 /* PLA_CRWECR */
 #define CRWECR_NORAML		0x00
 #define CRWECR_CONFIG		0xc0
@@ -223,6 +275,7 @@
 #define MCU_BORW_EN		0x4000
 
 /* PLA_CPCR */
+#define FLOW_CTRL_EN		BIT(0)
 #define CPCR_RX_VLAN		0x0040
 
 /* PLA_CFG_WOL */
@@ -244,6 +297,10 @@
 /* PLA_CONFIG34 */
 #define LINK_ON_WAKE_EN		0x0010
 #define LINK_OFF_WAKE_EN	0x0008
+
+/* PLA_USB_CFG */
+#define EN_XG_LIP		BIT(1)
+#define EN_G_LIP		BIT(2)
 
 /* PLA_CONFIG5 */
 #define BWF_EN			0x0040
@@ -267,6 +324,7 @@
 /* PLA_MAC_PWR_CTRL2 */
 #define EEE_SPDWN_RATIO		0x8007
 #define MAC_CLK_SPDWN_EN	BIT(15)
+#define EEE_SPDWN_RATIO_MASK	0xff
 
 /* PLA_MAC_PWR_CTRL3 */
 #define PLA_MCU_SPDWN_EN	BIT(14)
@@ -279,6 +337,7 @@
 #define PWRSAVE_SPDWN_EN	0x1000
 #define RXDV_SPDWN_EN		0x0800
 #define TX10MIDLE_EN		0x0100
+#define IDLE_SPDWN_EN		BIT(6)
 #define TP100_SPDWN_EN		0x0020
 #define TP500_SPDWN_EN		0x0010
 #define TP1000_SPDWN_EN		0x0008
@@ -302,6 +361,13 @@
 
 /* PLA_EXTRA_STATUS */
 #define U3P3_CHECK_EN		BIT(7)
+
+/* PLA_GPHY_CTRL */
+#define GPHY_FLASH		BIT(1)
+
+/* PLA_POL_GPIO_CTRL */
+#define DACK_DET_EN		BIT(15)
+#define POL_GPHY_PATCH		BIT(4)
 
 /* USB_USB2PHY */
 #define USB2PHY_SUSPEND		0x0001
@@ -347,9 +413,15 @@
 #define BMU_RESET_EP_IN		0x01
 #define BMU_RESET_EP_OUT	0x02
 
+/* USB_BMU_CONFIG */
+#define ACT_ODMA		BIT(1)
+
 /* USB_UPT_RXDMA_OWN */
 #define OWN_UPDATE		BIT(0)
 #define OWN_CLEAR		BIT(1)
+
+/* USB_FW_TASK */
+#define FC_PATCH_TASK		BIT(1)
 
 /* USB_UPS_CTRL */
 #define POWER_CUT		0x0100
@@ -357,12 +429,37 @@
 /* USB_PM_CTRL_STATUS */
 #define RESUME_INDICATE		0x0001
 
+/* USB_ECM_OPTION */
+#define BYPASS_MAC_RESET	BIT(5)
+
+/* USB_ECM_OP */
+#define	EN_ALL_SPEED		BIT(0)
+
+/* USB_GPHY_CTRL */
+#define GPHY_PATCH_DONE		BIT(2)
+#define BYPASS_FLASH		BIT(5)
+#define BACKUP_RESTRORE		BIT(6)
+
+/* USB_SPEED_OPTION */
+#define RG_PWRDN_EN		BIT(8)
+#define ALL_SPEED_OFF		BIT(9)
+
+/* USB_FW_CTRL */
+#define FLOW_CTRL_PATCH_OPT	BIT(1)
+#define AUTO_SPEEDUP		BIT(3)
+#define FLOW_CTRL_PATCH_2	BIT(8)
+
+/* USB_FC_TIMER */
+#define CTRL_TIMER_EN		BIT(15)
+
 /* USB_USB_CTRL */
+#define CDC_ECM_EN		BIT(3)
 #define RX_AGG_DISABLE		0x0010
 #define RX_ZERO_EN		0x0080
 
 /* USB_U2P3_CTRL */
 #define U2P3_ENABLE		0x0001
+#define RX_DETECT8		BIT(3)
 
 /* USB_POWER_CUT */
 #define PWR_EN			0x0001
@@ -395,6 +492,7 @@
 
 /* USB_UPS_CFG */
 #define SAW_CNT_1MS_MASK	0x0fff
+#define MID_REVERSE		BIT(5)	/* RTL8156A */
 
 /* OCP_ALDPS_CONFIG */
 #define ENPWRSAVE		0x8000
@@ -404,8 +502,12 @@
 
 /* OCP_PHY_STATUS */
 #define PHY_STAT_MASK		0x0007
+#define PHY_STAT_EXT_INIT	2
 #define PHY_STAT_LAN_ON		3
 #define PHY_STAT_PWRDN		5
+
+/* OCP_INTR_EN */
+#define INTR_SPEED_FORCE	BIT(3)
 
 /* OCP_NCTL_CFG */
 #define PGA_RETURN_EN		BIT(1)
@@ -451,16 +553,36 @@
 #define EEE10_EN		0x0010
 
 /* OCP_DOWN_SPEED */
+#define EN_EEE_CMODE		BIT(14)
+#define EN_EEE_1000		BIT(13)
+#define EN_EEE_100		BIT(12)
+#define EN_10M_CLKDIV		BIT(11)
 #define EN_10M_BGOFF		0x0080
+
+/* OCP_10GBT_CTRL */
+#define RTL_ADV2_5G_F_R		BIT(5)	/* Advertise 2.5GBASE-T fast-retrain */
 
 /* OCP_PHY_STATE */
 #define TXDIS_STATE		0x01
 #define ABD_STATE		0x02
 
+/* OCP_PHY_PATCH_STAT */
+#define PATCH_READY		BIT(6)
+
+/* OCP_PHY_PATCH_CMD */
+#define PATCH_REQUEST		BIT(4)
+
+/* OCP_PHY_LOCK */
+#define PATCH_LOCK		BIT(0)
+
 /* OCP_ADC_CFG */
 #define CKADSEL_L		0x0100
 #define ADC_EN			0x0080
 #define EN_EMI_L		0x0040
+
+/* OCP_SYSCLK_CFG */
+#define sysclk_div_expo(x)	(min(x, 5) << 8)
+#define clk_div_expo(x)		(min(x, 5) << 4)
 
 /* SRAM_GREEN_CFG */
 #define GREEN_ETH_EN		BIT(15)
@@ -477,6 +599,9 @@
 
 /* SRAM_IMPEDANCE */
 #define RX_DRIVING_MASK		0x6000
+
+/* SRAM_PHY_LOCK */
+#define PHY_PATCH_LOCK		0x0001
 
 #define RTL8152_MAX_TX		4
 #define RTL8152_MAX_RX		10
@@ -513,6 +638,7 @@
 #define SPEED_10                10
 #define SPEED_100               100
 #define SPEED_1000              1000
+#define SPEED_2500              2500
 
 #define SPEED_UNKNOWN           -1
 
@@ -612,10 +738,25 @@ enum rtl_version {
 	RTL_VER_07,
 	RTL_VER_08,
 	RTL_VER_09,
+
+	RTL_TEST_01,
+	RTL_VER_10,
+	RTL_VER_11,
+	RTL_VER_12,
+	RTL_VER_13,
+	//RTL_VER_14,
+	RTL_VER_15,
+
 	RTL_VER_MAX
 };
 
 enum rtl_register_content {
+	_5000bps	= BIT(12),
+	_2500bps	= BIT(10),
+	_1250bps	= BIT(9),
+	_500bps		= BIT(8),
+	_tx_flow	= BIT(6),
+	_rx_flow	= BIT(5),
 	_1000bps	= 0x10,
 	_100bps		= 0x08,
 	_10bps		= 0x04,
@@ -627,6 +768,7 @@ struct r8152 {
 	struct usb_device *udev;
 	struct usb_interface *intf;
 	bool supports_gmii;
+	bool supports_xgmii;
 
 	struct rtl_ops {
 		void (*init)(struct r8152 *);
@@ -671,11 +813,23 @@ u16 ocp_reg_read(struct r8152 *tp, u16 addr);
 void ocp_reg_write(struct r8152 *tp, u16 addr, u16 data);
 
 void sram_write(struct r8152 *tp, u16 addr, u16 data);
+u16 sram_read(struct r8152 *tp, u16 addr);
+
+void ocp_word_set_bits(struct r8152 *tp, u16 type, u16 index, u16 set);
+void ocp_reg_clr_bits(struct r8152 *tp, u16 addr, u16 clear);
+void ocp_reg_set_bits(struct r8152 *tp, u16 addr, u16 set);
 
 int r8152_wait_for_bit(struct r8152 *tp, bool ocp_reg, u16 type, u16 index,
 		       const u32 mask, bool set, unsigned int timeout);
 
+bool r8156b_flash_used(struct r8152 *tp);
+
+void rtl_reset_ocp_base(struct r8152 *tp);
+
 void r8152b_firmware(struct r8152 *tp);
 void r8153_firmware(struct r8152 *tp);
 void r8153b_firmware(struct r8152 *tp);
+void r8156_ram_code(struct r8152 *tp, bool power_cut);
+
+void r8156_patch_code(struct r8152 *tp);
 #endif
