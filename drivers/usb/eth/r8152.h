@@ -40,6 +40,7 @@
 #define PLA_BOOT_CTRL		0xe004
 #define PLA_GPHY_INTR_IMR	0xe022
 #define PLA_EEE_CR		0xe040
+#define PLA_EEE_TXTWSYS		0xe04c
 #define PLA_EEE_TXTWSYS_2P5G	0xe058
 #define PLA_EEEP_CR		0xe080
 #define PLA_MAC_PWR_CTRL	0xe0c0
@@ -91,6 +92,7 @@
 
 #define USB_USB2PHY		0xb41e
 #define USB_SSPHYLINK2		0xb428
+#define USB_L1_CTRL		0xb45e
 #define USB_U2P3_CTRL		0xb460
 #define USB_CSR_DUMMY1		0xb464
 #define USB_CSR_DUMMY2		0xb466
@@ -128,6 +130,7 @@
 #define USB_BMU_RESET		0xd4b0
 #define USB_BMU_CONFIG		0xd4b4
 #define USB_U1U2_TIMER		0xd4da
+#define USB_RX_AGGR_NUM		0xd4ee
 #define USB_FW_TASK		0xd4e8	/* RTL8153B */
 #define USB_UPS_CTRL		0xd800
 #define USB_POWER_CUT		0xd80a
@@ -247,6 +250,9 @@
 
 /* PLA_TCR1 */
 #define VERSION_MASK		0x7cf0
+#define IFG_MASK		(BIT(3) | BIT(9) | BIT(8))
+#define IFG_144NS		BIT(9)
+#define IFG_96NS		(BIT(9) | BIT(8))
 
 /* PLA_MTPS */
 #define MTPS_JUMBO		(12 * 1024 / 64)
@@ -414,6 +420,9 @@
 
 /* USB_RX_EARLY_TIMEOUT */
 #define RX_AUXILIARY_TIMER	1264
+
+/* USB_RX_AGGR_NUM */
+#define RX_AGGR_NUM_MASK	0x1ff
 
 /* USB_TX_DMA */
 #define TEST_MODE_DISABLE	0x00000001
@@ -639,6 +648,12 @@
 
 #define RTL8152_RMS		(RTL8152_ETH_FRAME_LEN + CRC_SIZE)
 #define RTL8153_RMS		(RTL8152_ETH_FRAME_LEN + CRC_SIZE)
+/*
+ * Linux's mtu_to_size(): mtu + VLAN_ETH_HLEN + ETH_FCS_LEN.  The RTL8156
+ * family leaves room for a VLAN tag, so it is 4 bytes larger than the
+ * RTL8153 value above.
+ */
+#define RTL8156_RMS		(RTL8152_ETH_FRAME_LEN + 4 + CRC_SIZE)
 #define RTL8152_TX_TIMEOUT	(5 * HZ)
 
 #define MCU_TYPE_PLA			0x0100
@@ -773,6 +788,9 @@ enum rtl_register_content {
 	LINK_STATUS	= 0x02,
 	FULL_DUP	= 0x01,
 };
+
+#define is_flow_control(_speed)	\
+	(((_speed) & (_tx_flow | _rx_flow)) == (_tx_flow | _rx_flow))
 
 struct r8152 {
 	struct usb_device *udev;

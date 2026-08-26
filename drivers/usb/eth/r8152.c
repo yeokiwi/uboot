@@ -537,9 +537,13 @@ static void rtl8152_nic_reset(struct r8152 *tp)
 	}
 }
 
-static u8 rtl8152_get_speed(struct r8152 *tp)
+static u16 rtl8152_get_speed(struct r8152 *tp)
 {
-	return ocp_read_byte(tp, MCU_TYPE_PLA, PLA_PHYSTATUS);
+	/*
+	 * Must be a word: _2500bps is BIT(10) and _500bps is BIT(8), so a
+	 * byte read cannot see the speeds the RTL8156 family reports.
+	 */
+	return ocp_read_word(tp, MCU_TYPE_PLA, PLA_PHYSTATUS);
 }
 
 static void rtl_set_eee_plus(struct r8152 *tp)
@@ -576,6 +580,25 @@ static void rtl8152_set_rx_mode(struct r8152 *tp)
 	ocp_data = ocp_read_dword(tp, MCU_TYPE_PLA, PLA_RCR);
 	ocp_data |= RCR_APM | RCR_AM | RCR_AB;
 	ocp_write_dword(tp, MCU_TYPE_PLA, PLA_RCR, ocp_data);
+}
+
+/*
+ * Inter-frame gap and the 10M idle timer, per negotiated speed.
+ * Ported from Linux drivers/net/usb/r8152.c rtl_set_ifg().
+ */
+static void rtl_set_ifg(struct r8152 *tp, u16 speed)
+{
+	if ((speed & (_10bps | _100bps)) && !(speed & FULL_DUP)) {
+		ocp_word_w0w1(tp, MCU_TYPE_PLA, PLA_TCR1, IFG_MASK, IFG_144NS);
+
+		ocp_word_clr_bits(tp, MCU_TYPE_PLA, PLA_MAC_PWR_CTRL4,
+				  TX10MIDLE_EN);
+	} else {
+		ocp_word_w0w1(tp, MCU_TYPE_PLA, PLA_TCR1, IFG_MASK, IFG_96NS);
+
+		ocp_word_set_bits(tp, MCU_TYPE_PLA, PLA_MAC_PWR_CTRL4,
+				  TX10MIDLE_EN);
+	}
 }
 
 static inline void r8153b_rx_agg_chg_indicate(struct r8152 *tp)
@@ -733,18 +756,58 @@ static void r8156_fc_parameter(struct r8152 *tp)
 	ocp_write_word(tp, MCU_TYPE_PLA, PLA_RX_FIFO_EMPTY, pause_off / 16);
 }
 
+/*
+ * Ported from Linux drivers/net/usb/r8152.c rtl8156_enable().  The version
+ * tests matter: RTL8156B and later default to packet-count based RX
+ * aggregation, so USB_RX_AGGR_NUM has to be cleared or the bulk-IN never
+ * completes for a single packet and every receive times out.
+ */
 static int rtl8156_enable(struct r8152 *tp)
 {
-	r8156_fc_parameter(tp);
+	u16 speed;
 
-	ocp_word_clr_bits(tp, MCU_TYPE_PLA, PLA_MAC_PWR_CTRL4,
-			  IDLE_SPDWN_EN);
+	if (tp->version < RTL_VER_12)
+		r8156_fc_parameter(tp);
+
+	rtl_set_eee_plus(tp);
+
+	if (tp->version >= RTL_VER_12)
+		ocp_word_clr_bits(tp, MCU_TYPE_USB, USB_RX_AGGR_NUM,
+				  RX_AGGR_NUM_MASK);
+
+	r8153_set_rx_early_timeout(tp);
+	r8153_set_rx_early_size(tp);
+
+	speed = rtl8152_get_speed(tp);
+	rtl_set_ifg(tp, speed);
+
+	if (speed & _2500bps)
+		ocp_word_clr_bits(tp, MCU_TYPE_PLA, PLA_MAC_PWR_CTRL4,
+				  IDLE_SPDWN_EN);
+	else
+		ocp_word_set_bits(tp, MCU_TYPE_PLA, PLA_MAC_PWR_CTRL4,
+				  IDLE_SPDWN_EN);
+
+	if (tp->version < RTL_VER_12) {
+		if (speed & _1000bps)
+			ocp_write_word(tp, MCU_TYPE_PLA, PLA_EEE_TXTWSYS, 0x11);
+		else if (speed & _500bps)
+			ocp_write_word(tp, MCU_TYPE_PLA, PLA_EEE_TXTWSYS, 0x3d);
+	}
+
+	if (tp->udev->speed == USB_SPEED_HIGH) {
+		/* USB 0xb45e[3:0] l1_nyet_hird */
+		if (is_flow_control(speed))
+			ocp_word_w0w1(tp, MCU_TYPE_USB, USB_L1_CTRL, 0xf, 0xf);
+		else
+			ocp_word_w0w1(tp, MCU_TYPE_USB, USB_L1_CTRL, 0xf, 0x1);
+	}
 
 	ocp_word_clr_bits(tp, MCU_TYPE_USB, USB_FW_TASK, FC_PATCH_TASK);
 	mdelay(2);
 	ocp_word_set_bits(tp, MCU_TYPE_USB, USB_FW_TASK, FC_PATCH_TASK);
 
-	return rtl8153_enable(tp);
+	return rtl_enable(tp);
 }
 
 static void rtl_disable(struct r8152 *tp)
@@ -1278,6 +1341,22 @@ static void r8153_disable_aldps(struct r8152 *tp)
 	data &= ~EN_ALDPS;
 	ocp_reg_write(tp, OCP_POWER_CFG, data);
 	mdelay(20);
+}
+
+static void r8153_aldps_en(struct r8152 *tp, bool enable)
+{
+	if (enable) {
+		ocp_reg_set_bits(tp, OCP_POWER_CFG, EN_ALDPS);
+	} else {
+		int i;
+
+		ocp_reg_clr_bits(tp, OCP_POWER_CFG, EN_ALDPS);
+		for (i = 0; i < 20; i++) {
+			mdelay(1);
+			if (ocp_read_word(tp, MCU_TYPE_PLA, 0xe000) & 0x0100)
+				break;
+		}
+	}
 }
 
 static void r8153b_hw_phy_cfg(struct r8152 *tp)
@@ -1926,14 +2005,32 @@ static void r8153_enter_oob(struct r8152 *tp)
 	ocp_write_dword(tp, MCU_TYPE_PLA, PLA_RCR, ocp_data);
 }
 
+/*
+ * Ported from Linux drivers/net/usb/r8152.c rtl8156_change_mtu().  PLA_RMS is
+ * the MAC's receive maximum size; without it the chip keeps whatever the reset
+ * default is and silently drops full-size frames, which looks like a link that
+ * comes up and passes nothing.
+ */
+static void rtl8156_change_mtu(struct r8152 *tp)
+{
+	u32 rx_max_size = RTL8156_RMS;
+
+	ocp_write_word(tp, MCU_TYPE_PLA, PLA_RMS, rx_max_size);
+	ocp_write_byte(tp, MCU_TYPE_PLA, PLA_MTPS, MTPS_JUMBO);
+	r8156_fc_parameter(tp);
+
+	/* TX share fifo free credit full threshold */
+	ocp_write_word(tp, MCU_TYPE_PLA, PLA_TXFIFO_CTRL, 512 / 64);
+	ocp_write_word(tp, MCU_TYPE_PLA, PLA_TXFIFO_FULL,
+		       ALIGN(rx_max_size + sizeof(struct tx_desc), 1024) / 16);
+}
+
 static void r8156_exit_oob(struct r8152 *tp)
 {
 	rxdy_gated_en(tp, true);
 	r8153_teredo_off(tp);
 
 	ocp_dword_clr_bits(tp, MCU_TYPE_PLA, PLA_RCR, RCR_ACPT_ALL);
-
-	r8153_hw_phy_cfg(tp);
 
 	rtl8152_nic_reset(tp);
 	rtl_reset_bmu(tp);
@@ -1943,6 +2040,8 @@ static void r8156_exit_oob(struct r8152 *tp)
 	ocp_word_clr_bits(tp, MCU_TYPE_PLA, PLA_SFF_STS_7, MCU_BORW_EN);
 
 	rtl_rx_vlan_en(tp, false);
+
+	rtl8156_change_mtu(tp);
 
 	switch (tp->version) {
 	case RTL_TEST_01:
@@ -1958,10 +2057,6 @@ static void r8156_exit_oob(struct r8152 *tp)
 	/* share FIFO settings */
 	ocp_word_w0w1(tp, MCU_TYPE_PLA, PLA_RXFIFO_FULL, RXFIFO_FULL_MASK,
 		      0x08);
-
-	/* TX share fifo free credit full threshold */
-	ocp_write_word(tp, MCU_TYPE_PLA, PLA_TXFIFO_CTRL, 512 / 64);
-	ocp_write_word(tp, MCU_TYPE_PLA, PLA_TXFIFO_FULL, 2048 / 8);
 
 	r8153b_mcu_spdown_en(tp, false);
 
@@ -2181,7 +2276,16 @@ static void rtl8153c_up(struct r8152 *tp)
 
 static void rtl8156_up(struct r8152 *tp)
 {
+	r8153b_u1u2en(tp, false);
+	r8153_u2p3en(tp, false);
+	r8153_aldps_en(tp, false);
+
 	r8156_exit_oob(tp);
+
+	r8153_aldps_en(tp, true);
+	r8153_u2p3en(tp, true);
+	if (tp->udev->speed >= USB_SPEED_SUPER)
+		r8153b_u1u2en(tp, true);
 }
 
 static void rtl8156_down(struct r8152 *tp)
@@ -2461,6 +2565,9 @@ static void r8156_init(struct r8152 *tp)
 	rtl_tally_reset(tp);
 	r8156_hw_phy_cfg(tp);
 	r8152b_enable_fc(tp);
+
+	/* RX aggregation timer, as Linux sets it for this family */
+	tp->coalesce = 15000;
 }
 
 static void r8156b_init(struct r8152 *tp)
@@ -2537,6 +2644,9 @@ static void r8156b_init(struct r8152 *tp)
 	rtl_tally_reset(tp);
 	r8156b_hw_phy_cfg(tp);
 	r8152b_enable_fc(tp);
+
+	/* RX aggregation timer, as Linux sets it for this family */
+	tp->coalesce = 15000;
 }
 
 static void rtl8152_unload(struct r8152 *tp)
@@ -2625,9 +2735,25 @@ static int rtl_ops_init(struct r8152 *tp)
 	return ret;
 }
 
+static const char *rtl8152_speed_name(u16 speed)
+{
+	if (speed & _2500bps)
+		return "2.5 Gbps";
+	else if (speed & _1000bps)
+		return "1 Gbps";
+	else if (speed & _500bps)
+		return "500 Mbps";
+	else if (speed & _100bps)
+		return "100 Mbps";
+	else if (speed & _10bps)
+		return "10 Mbps";
+	else
+		return "unknown speed";
+}
+
 static int r8152_init_common(struct r8152 *tp)
 {
-	u8 speed;
+	u16 speed;
 	int timeout = 0;
 	int link_detected;
 
@@ -2649,6 +2775,10 @@ static int r8152_init_common(struct r8152 *tp)
 
 		if (timeout != 0)
 			printf("done.\n");
+
+		printf("r8152: link up, %s %s duplex\n",
+		       rtl8152_speed_name(speed),
+		       (speed & FULL_DUP) ? "full" : "half");
 	} else {
 		printf("unable to connect.\n");
 	}
