@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# Optional Compose front end.  docker/build.sh does the same thing with less
+# ceremony; this exists for people who would rather drive it from Compose.
+#
+# Compose cannot expand $(id -u) itself, and bash makes UID readonly so it
+# cannot be assigned inline, hence the UBOOT_UID/UBOOT_GID names:
+#
+#   export UBOOT_UID=$(id -u) UBOOT_GID=$(id -g)
+#   docker compose -f docker/compose.yaml run --rm uboot make rpi5_circle_net_defconfig
+#   docker compose -f docker/compose.yaml run --rm uboot make -j"$(nproc)"
+#
+# Without them the container writes root-owned files into your worktree.
+# Equivalently, skip the exports and pass the user through per-run:
+#
+#   docker compose -f docker/compose.yaml run --rm --user "$(id -u):$(id -g)" uboot make ...
+
+services:
+  uboot:
+    build:
+      context: .
+    image: uboot-build:24.04
+    user: "${UBOOT_UID:-1000}:${UBOOT_GID:-1000}"
+    working_dir: /work
+    volumes:
+      - ..:/work
+    environment:
+      # Keep container output away from a native build in the same worktree.
+      KBUILD_OUTPUT: build-docker
+    command: ["bash"]
+    stdin_open: true
+    tty: true

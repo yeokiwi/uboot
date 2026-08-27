@@ -119,6 +119,21 @@ strings u-boot.bin | grep '^circle_boot'
 `make rpi_arm64_defconfig` still builds the stock upstream configuration, with
 `bootcircle` and the `circle_*` environment absent.
 
+### In a container
+
+If you would rather not install a toolchain on the host, everything above is
+also available in a build container, on both x86_64 and aarch64 machines:
+
+```bash
+docker/build.sh                         # rpi5_circle_net_defconfig
+docker/build.sh rpi5_circle_defconfig
+```
+
+The output lands in `build-docker/u-boot.bin`, owned by you rather than root.
+No host `apt-get` is needed. See [docker/README.md](docker/README.md) — in
+particular the note on clearing a native in-tree build first, since kbuild will
+not build out of tree alongside one.
+
 ---
 
 ## Build a Circle application
