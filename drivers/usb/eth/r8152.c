@@ -688,6 +688,28 @@ static void r8153_set_rx_early_size(struct r8152 *tp)
 	u32 ocp_data = (RTL8152_AGG_BUF_SZ - RTL8153_RMS -
 			sizeof(struct rx_desc));
 
+	/*
+	 * The RTL8156 family programs PLA_RMS to RTL8156_RMS and pads each
+	 * descriptor to RX_ALIGN, so reserve what the chip can actually
+	 * commit - Linux's rx_reserved_size().  Reserving the RTL8153 frame
+	 * size instead lets the chip overrun the buffer by a few bytes; the
+	 * surplus then turns up at the head of the next transfer and parses
+	 * as garbage.  RTL8153C (RTL_VER_14) keeps the RTL8153 sizing.
+	 */
+	switch (tp->version) {
+	case RTL_TEST_01:
+	case RTL_VER_10:
+	case RTL_VER_11:
+	case RTL_VER_12:
+	case RTL_VER_13:
+	case RTL_VER_15:
+		ocp_data = RTL8152_AGG_BUF_SZ - RTL8156_RMS -
+			   sizeof(struct rx_desc) - RX_ALIGN;
+		break;
+	default:
+		break;
+	}
+
 	switch (tp->version) {
 	case RTL_VER_03:
 	case RTL_VER_04:
@@ -2861,11 +2883,23 @@ int r8152_eth_recv(struct udevice *dev, int flags, uchar **packetp)
 		debug("%s: second try, len=%d\n", __func__, len);
 	}
 
+	/*
+	 * The residue at the end of an aggregate can be shorter than one
+	 * descriptor.  Check before dereferencing, and keep the comparison
+	 * signed: len is int and sizeof() is size_t, so "len - sizeof(...)"
+	 * would promote to unsigned and wrap for any short read, letting a
+	 * bogus packet_len through and reading past the buffer.
+	 */
+	if (len < (int)(sizeof(struct rx_desc) + ETH_ZLEN + CRC_SIZE)) {
+		debug("Rx: short residue: %d\n", len);
+		goto err;
+	}
+
 	rx_desc = (struct rx_desc *)ptr;
 	packet_len = le32_to_cpu(rx_desc->opts1) & RX_LEN_MASK;
 	packet_len -= CRC_SIZE;
 
-	if (packet_len > len - (sizeof(struct rx_desc) + CRC_SIZE)) {
+	if ((int)packet_len > len - (int)(sizeof(struct rx_desc) + CRC_SIZE)) {
 		debug("Rx: too large packet: %d\n", packet_len);
 		goto err;
 	}
