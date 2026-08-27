@@ -518,6 +518,7 @@ static void rtl8152_nic_reset(struct r8152 *tp)
 	case RTL_VER_09:
 	case RTL_VER_12:
 	case RTL_VER_13:
+	case RTL_VER_14:
 	case RTL_VER_15:
 		ocp_write_byte(tp, MCU_TYPE_PLA, PLA_CR, PLA_CR_RST);
 		for (i = 0; i < 1000; i++) {
@@ -2515,7 +2516,7 @@ static void r8153b_init(struct r8152 *tp)
 	r8153_power_cut_en(tp, false);
 
 	/* MAC clock speed down */
-	r8153_mac_clk_speed_down(tp, false);
+	r8153_mac_clk_speed_down(tp, true);
 
 	r8153b_mcu_spdown_en(tp, false);
 
@@ -2583,6 +2584,8 @@ static void r8156_init(struct r8152 *tp)
 	/* enable rx aggregation */
 	ocp_word_clr_bits(tp, MCU_TYPE_USB, USB_USB_CTRL,
 			  RX_AGG_DISABLE | RX_ZERO_EN);
+
+	r8156_mdio_force_mode(tp);
 
 	rtl_tally_reset(tp);
 	r8156_hw_phy_cfg(tp);
