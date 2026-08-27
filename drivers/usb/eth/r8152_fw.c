@@ -959,36 +959,6 @@ static void r8153_wdt1_end(struct r8152 *tp)
 	}
 }
 
-static int rtl_phy_patch_request(struct r8152 *tp, bool request, bool wait)
-{
-	u16 check;
-	int i;
-
-	if (request) {
-		ocp_reg_set_bits(tp, OCP_PHY_PATCH_CMD, PATCH_REQUEST);
-		check = 0;
-	} else {
-		ocp_reg_clr_bits(tp, OCP_PHY_PATCH_CMD, PATCH_REQUEST);
-		check = PATCH_READY;
-	}
-
-	for (i = 0; wait && i < 5000; i++) {
-		u16 data;
-
-		mdelay(1);
-		data = ocp_reg_read(tp, OCP_PHY_PATCH_STAT);
-		if ((data & PATCH_READY) ^ check)
-			break;
-	}
-
-	if (request && wait && i == 5000) {
-		ocp_reg_clr_bits(tp, OCP_PHY_PATCH_CMD, PATCH_REQUEST);
-		return -ETIME;
-	}
-
-	return 0;
-}
-
 static void rtl_patch_key_set(struct r8152 *tp, u16 key_addr, u16 patch_key)
 {
 	if (patch_key && key_addr) {

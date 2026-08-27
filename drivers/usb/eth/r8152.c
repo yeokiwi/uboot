@@ -1083,7 +1083,7 @@ void rtl_reset_ocp_base(struct r8152 *tp)
 	tp->ocp_base = -1;
 }
 
-static int rtl_phy_patch_request(struct r8152 *tp, bool request, bool wait)
+int rtl_phy_patch_request(struct r8152 *tp, bool request, bool wait)
 {
 	u16 check;
 	int i;

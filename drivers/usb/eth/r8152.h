@@ -853,6 +853,7 @@ int r8152_wait_for_bit(struct r8152 *tp, bool ocp_reg, u16 type, u16 index,
 bool r8156b_flash_used(struct r8152 *tp);
 
 void rtl_reset_ocp_base(struct r8152 *tp);
+int rtl_phy_patch_request(struct r8152 *tp, bool request, bool wait);
 
 void r8152b_firmware(struct r8152 *tp);
 void r8153_firmware(struct r8152 *tp);
