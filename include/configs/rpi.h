@@ -83,6 +83,47 @@
 
 #define CIRCLE_NET_PREBOOT	"; run circle_netpreboot"
 
+/*
+ * The storage loader, U-Boot's web UI for putting a file on the SD card
+ * (see doc/usage/cmd/httpd.rst).  Every boot asks one question before the
+ * boot command runs: is there anyone out there who wants to give this board
+ * a file?
+ *
+ *   web_net    brings the USB Ethernet adapter up and makes it the active
+ *              interface - the same "run net_usb" as by hand;
+ *   web_ip     leaves a static ipaddr alone and otherwise asks DHCP;
+ *   web_ping   pings web_server, or whatever DHCP left in serverip;
+ *   web_ui     runs the server, which owns the board until the page's
+ *              "Continue boot" button is pressed or Ctrl-C is typed.
+ *
+ * Any of those failing means the boot carries on as it always did.  The wait
+ * is bounded by ping's own timeout, about ten seconds, so an unreachable or
+ * absent server costs that much and no more.  Set web_enable to 0 (and
+ * saveenv) to skip the whole thing, which also skips the "usb start" that
+ * comes with it.
+ */
+#ifdef CONFIG_CMD_HTTPD
+#define CIRCLE_WEB_ENV_SETTINGS \
+	"web_enable=1\0" \
+	"web_server=\0" \
+	"web_port=80\0" \
+	"web_net=run net_usb\0" \
+	"web_ip=if test -z ${ipaddr}; then dhcp; fi\0" \
+	"web_ping=" \
+		"if test -n ${web_server}; then ping ${web_server}; " \
+		"else ping ${serverip}; fi\0" \
+	"web_ui=httpd ${web_port}\0" \
+	"web_start=" \
+		"if run web_net && run web_ip && run web_ping; then " \
+			"run web_ui; " \
+		"fi\0" \
+	"web_preboot=if test ${web_enable} -eq 1; then run web_start; fi\0"
+#else
+/* "run" on an undefined variable fails, so it has to exist either way */
+#define CIRCLE_WEB_ENV_SETTINGS \
+	"web_preboot=true\0"
+#endif
+
 #define CIRCLE_NET_ENV_SETTINGS \
 	"autoload=no\0" \
 	"hostname=rpi5-uboot\0" \
@@ -101,7 +142,9 @@
 	"circle_netcon=0\0" \
 	"circle_netpreboot=" \
 		"if test ${circle_usbnet} -eq 1; then usb start; fi; " \
-		"if test ${circle_netcon} -eq 1; then run nc; fi\0" \
+		"if test ${circle_netcon} -eq 1; then run nc; fi; " \
+		"run web_preboot\0" \
+	CIRCLE_WEB_ENV_SETTINGS \
 	"circle_tftp=tftp ${circle_addr} ${circle_kernel}\0" \
 	"circle_netboot=" \
 		"if run net_up && run circle_tftp; then " \

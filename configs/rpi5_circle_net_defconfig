@@ -130,6 +130,16 @@ CONFIG_USB_XHCI_DWC3=y
 # Network console.  Requires the legacy stack; see the note above.
 CONFIG_NETCONSOLE=y
 
+# The storage loader web UI: a browser writes a file to the SD card.
+# CONFIG_HTTPD selects PROT_TCP, the legacy stack's TCP implementation.
+CONFIG_HTTPD=y
+CONFIG_CMD_HTTPD=y
+
+# ARCH_BCM283X already implies FAT_WRITE, so "make savedefconfig" drops this
+# line - but the loader cannot write anything without it, which is the same
+# reason CONFIG_CMD_FAT is spelled out above.
+CONFIG_FAT_WRITE=y
+
 # "clk dump" is step 3 of the Ethernet bring-up procedure in
 # doc/board/broadcom/raspberrypi-circle-net.rst, but CMD_CLK was never
 # enabled, so it failed as an unknown command.  (dm tree and mdio list, the

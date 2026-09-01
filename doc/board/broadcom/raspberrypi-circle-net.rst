@@ -196,6 +196,74 @@ you can interrupt the autoboot from the network console.
 before handing over, so nothing is left doing DMA - or printing to freed
 memory - across the jump into Circle.
 
+Web storage loader
+------------------
+
+``rpi5_circle_net_defconfig`` builds U-Boot's HTTP server
+(:doc:`../../usage/cmd/httpd`), a page that writes an uploaded file to the SD
+card.  On this board it is the answer to a Pi that is bolted into something:
+no card reader, no serial cable and no TFTP server needed to replace
+``kernel_2712.img``.
+
+Every boot offers it before the boot command runs::
+
+   preboot -> circle_preboot -> circle_netpreboot -> web_preboot
+                                                       |
+                          run net_usb  (usb start, netdev=eth1, ethact=eth1)
+                          dhcp         (unless ipaddr is already set)
+                          ping ${web_server:-serverip}
+                            |                    |
+                          reply                 silence
+                            |                    |
+                          httpd                 fall through to bootcmd
+
+The ping is the whole decision: a machine that answers is taken to mean
+someone is there to hand the board a file, so the UI is served and the board
+waits.  Nothing answering - no adapter, no cable, no DHCP, no server - costs
+about ten seconds, ping's own timeout, and then the board boots as it always
+did.  The server likewise gives the board back the moment the page's
+*Continue boot* button is pressed or Ctrl-C is typed on the console.
+
+Point it at the machine that will do the flashing rather than at whatever
+DHCP handed over as ``serverip``::
+
+   U-Boot> setenv web_server 192.168.1.10
+   U-Boot> saveenv
+
+and turn the whole thing off with::
+
+   U-Boot> setenv web_enable 0
+   U-Boot> saveenv
+
+The pieces are separate variables so that any of them can be replaced.  To
+use the onboard interface instead of a USB adapter::
+
+   U-Boot> setenv web_net 'run net_onboard'
+
+To run the UI unconditionally, without asking the network first::
+
+   U-Boot> setenv web_start 'if run web_net && run web_ip; then run web_ui; fi'
+
+or, from a prompt, just ``run net_usb; dhcp; httpd``.
+
+The upload lands at ``$loadaddr`` (0x1000000) and is capped by
+``httpd_maxsize`` at 64 MiB; ``${circle_addr}`` at 0x80000 is below it and is
+not disturbed, so a running ``bootcircle`` image is never overwritten by an
+upload.
+
+.. note::
+
+   Serving the page needs an address, and ``web_ip`` only runs ``dhcp`` when
+   ``ipaddr`` is empty.  With a static address, set ``ipaddr`` and
+   ``web_server`` and the boot never waits for DHCP at all.
+
+.. note::
+
+   ``circle_netcon=1`` and the web loader both want the network early, and
+   the console follows ``netdev`` while the loader forces it to the USB
+   adapter.  Set ``netdev=eth1`` if you want the network console on the same
+   interface the loader uses.
+
 USB Ethernet adapters
 ---------------------
 
@@ -335,3 +403,8 @@ Known limitations
   It is not in any U-Boot release, and it has not been run against a 2.5GbE
   adapter here - see the verification note in the top-level ``README.md``.
 * RTL8157 (5G) is patch 5/5 of that series and is not carried here.
+* The web storage loader answers one connection at a time - the legacy TCP
+  stack has room for a single stream - and writes through the filesystem, so
+  it cannot flash a raw image to a whole device.  It is meant for a trusted
+  network: anything that can reach the board while the page is up can write
+  to the card.

@@ -19,7 +19,7 @@ There are two builds:
 | Config | Use it for |
 |---|---|
 | `rpi5_circle_defconfig` | The default. Touches as little hardware as possible so the hand-off matches what Circle sees from the firmware. SD card only. |
-| `rpi5_circle_net_defconfig` | Adds Raspberry Pi 5 Ethernet so Circle images can be pulled over **TFTP**. Requires U-Boot to bring up PCIe and the RP1 southbridge on every boot — see [Ethernet and TFTP](#ethernet-and-tftp). |
+| `rpi5_circle_net_defconfig` | Adds Raspberry Pi 5 Ethernet so Circle images can be pulled over **TFTP**, a network console, and a **web UI for writing files to the SD card** from a browser. Requires U-Boot to bring up PCIe and the RP1 southbridge on every boot — see [Ethernet and TFTP](#ethernet-and-tftp). |
 
 - Detailed reference: [`doc/board/broadcom/raspberrypi-circle.rst`](doc/board/broadcom/raspberrypi-circle.rst)
 - Ethernet reference: [`doc/board/broadcom/raspberrypi-circle-net.rst`](doc/board/broadcom/raspberrypi-circle-net.rst)
@@ -37,6 +37,7 @@ There are two builds:
 - [The U-Boot prompt](#the-u-boot-prompt)
 - [Ethernet and TFTP](#ethernet-and-tftp)
 - [USB Ethernet and the network console](#usb-ethernet-and-the-network-console)
+- [Web storage loader](#web-storage-loader)
 - [Troubleshooting](#troubleshooting)
 - [Why multi-core needed fixing](#why-multi-core-needed-fixing)
 - [What was changed](#what-was-changed)
@@ -442,6 +443,66 @@ U-Boot release. RTL8157 (5G) is patch 5/5 of that series and is not carried.
 
 ---
 
+## Web storage loader
+
+The network build serves a web page that writes an uploaded file to the SD
+card or eMMC. It exists for the Pi that is already installed in something:
+replacing `kernel_2712.img` needs neither a card reader nor a serial cable nor
+a TFTP server — a browser on the same network is enough.
+
+**Every boot offers it before `bootcmd` runs**, and the decision is one ping:
+
+```
+preboot → circle_preboot → circle_netpreboot → web_preboot
+                                                  │
+                             run net_usb   USB adapter becomes the active interface
+                             dhcp          (skipped if ipaddr is already set)
+                             ping ${web_server}   ← or serverip, from DHCP
+                               │                     │
+                             reply                 silence
+                               │                     │
+                             httpd — the board waits │
+                                                     └→ bootcmd, as normal
+```
+
+A machine that answers means someone is there to hand the board a file, so the
+UI is served and the board waits for it. Nothing answering — no adapter, no
+cable, no DHCP, no server — costs about ten seconds, which is `ping`'s own
+timeout, and then the board boots as it always did. The page's **Continue
+boot** button (and Ctrl-C on the console) gives the board back at any time.
+
+Point it at the machine that will do the flashing, rather than at whatever
+DHCP left in `serverip`:
+
+```
+U-Boot> setenv web_server 192.168.1.10
+U-Boot> saveenv
+```
+
+To turn the whole thing off: `setenv web_enable 0; saveenv`. To run the UI by
+hand instead: `run net_usb; dhcp; httpd`.
+
+The page lists the MMC partitions it can write to with the filesystem on each,
+takes a dropped or chosen file, shows upload progress, and lists what is on the
+partition before and after. It fetches nothing from the internet — it is served
+by U-Boot itself. Scripted uploads work too:
+
+```bash
+curl -F iface=mmc -F part=0:1 -F name=kernel_2712.img \
+     -F file=@kernel_2712.img http://<board-ip>/api/upload
+```
+
+The upload is buffered at `$loadaddr` (`httpd_addr`) and capped at 64 MiB
+(`httpd_maxsize`), and the write goes through the filesystem, so the target
+partition needs `CONFIG_FAT_WRITE` — which the network config enables.
+
+Because U-Boot's legacy TCP has room for one connection at a time, this is a
+server for a trusted network and one user at a time: while the page is up,
+anything that can reach the board can write to its card. Command reference:
+[`doc/usage/cmd/httpd.rst`](doc/usage/cmd/httpd.rst).
+
+---
+
 ## Troubleshooting
 
 **Nothing on the serial console at all.** Check you are on the right connector
@@ -546,6 +607,20 @@ configuration and glue:
 | Detach the network console and halt the NIC before handing over | `board/raspberrypi/rpi/cmd_bootcircle.c` |
 | Name the unsupported chip instead of "Unknown Device" | `drivers/usb/eth/r8152.c` |
 
+Web storage loader — an HTTP server on the legacy TCP stack, and the boot-time
+ping that decides whether to run it:
+
+| Change | File |
+|---|---|
+| HTTP server: request parsing, multipart upload, write to storage | `net/httpd.c` |
+| The page it serves | `net/httpd_page.c` |
+| `httpd` command | `cmd/httpd.c` |
+| `HTTPD` protocol in the net loop | `net/net.c`, `include/net-legacy.h` |
+| `CONFIG_HTTPD`, `CONFIG_CMD_HTTPD` | `net/Kconfig`, `cmd/Kconfig` |
+| `web_*` environment and the `web_preboot` hook | `include/configs/rpi.h` |
+| `HTTPD`, `CMD_HTTPD`, `FAT_WRITE` | `configs/rpi5_circle_net_defconfig` |
+| Command documentation | `doc/usage/cmd/httpd.rst` |
+
 RTL8156/RTL8156B (2.5GbE) and RTL8153C — carried from ChunHao Lin's unmerged
 [vendor series](https://lists.denx.de/pipermail/u-boot/2024-November/572954.html)
 with original authorship preserved:
@@ -596,6 +671,15 @@ Done in CI-equivalent conditions:
   `RP1_CLK_ETH_TSU`
 - All RP1 drivers confirmed linked and registered (`clk_rp1`, `rp1_driver`,
   `rp1_gpio`, `eth_macb`, `pcie_brcm_base`)
+- The HTTP server's request handling was exercised on the host: the same
+  `net/httpd.c` compiled against stubs for the fs, block and TCP layers, then
+  driven through the TCP callbacks. Covered: the page and its `Content-Length`,
+  the JSON endpoints (including URL decoding and JSON escaping), a 100 kB
+  multipart upload delivered both in order and as reversed 512-byte segments
+  (byte-compared after the write), `Expect: 100-continue`, and the rejection
+  paths — path traversal, unknown endpoint, unsupported method, chunked body
+  and an upload larger than the buffer. The harness is not part of the tree;
+  the server has not been driven by a real browser on hardware
 - USB Ethernet and netconsole: `r8152_eth` (with its USB id table),
   `xhci_dwc3` and `drv_nc_init` confirmed linked and registered, and the
   `net_*`/`nc_*` environment confirmed present in `u-boot.bin`
