@@ -222,6 +222,20 @@ config PROT_TCP_SACK
 	  This option should be turn on if you want to achieve the fastest
 	  file transfer possible.
 
+config HTTPD
+	bool "HTTP server for loading files onto SD/eMMC"
+	depends on NET_LEGACY && CMD_MMC
+	select PROT_TCP
+	help
+	  Serve a small web page that writes an uploaded file to a partition
+	  on the board's SD card or eMMC.  It answers on TCP port 80 by
+	  default and is started by the "httpd" command, so a board with no
+	  serial console and no TFTP server can still be given a new kernel
+	  or boot script from a browser.
+
+	  Writing needs write support in the target filesystem, i.e.
+	  FAT_WRITE for a FAT partition.
+
 config IPV6
 	bool "IPv6 support"
 	help

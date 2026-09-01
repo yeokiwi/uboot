@@ -95,6 +95,7 @@
 #include <linux/compiler.h>
 #include <net/fastboot_udp.h>
 #include <net/fastboot_tcp.h>
+#include <net/httpd.h>
 #include <net/ncsi.h>
 #if defined(CONFIG_CMD_PCAP)
 #include <net/pcap.h>
@@ -506,6 +507,11 @@ restart:
 #if CONFIG_IS_ENABLED(TCP_FUNCTION_FASTBOOT)
 		case FASTBOOT_TCP:
 			fastboot_tcp_start_server();
+			break;
+#endif
+#if defined(CONFIG_HTTPD) && !defined(CONFIG_XPL_BUILD)
+		case HTTPD:
+			httpd_start_server();
 			break;
 #endif
 #if defined(CONFIG_CMD_DHCP)
@@ -1509,6 +1515,7 @@ common:
 	case NETCONS:
 	case FASTBOOT_UDP:
 	case FASTBOOT_TCP:
+	case HTTPD:
 	case TFTPSRV:
 		if (IS_ENABLED(CONFIG_IPV6) && use_ip6) {
 			if (!memcmp(&net_link_local_ip6, &net_null_addr_ip6,

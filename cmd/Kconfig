@@ -2133,6 +2133,14 @@ config CMD_TFTPSRV
 	help
 	  Act as a TFTP server and boot the first received file
 
+config CMD_HTTPD
+	bool "httpd"
+	depends on HTTPD
+	help
+	  Serve the storage loader web UI: a page that uploads a file from a
+	  browser and writes it to a partition on the SD card or eMMC.  The
+	  server runs until the page asks it to stop or Ctrl-C is pressed.
+
 config NET_TFTP_VARS
 	bool "Control TFTP timeout and count through environment"
 	depends on CMD_TFTPBOOT
