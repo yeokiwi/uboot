@@ -82,6 +82,7 @@
  * @head_done:	the request head has been parsed
  * @replied:	a response has been queued; further request data is ignored
  * @too_big:	the request outgrew the receive buffer
+ * @have_len:	a Content-Length header was present
  * @is_post:	the request method is POST
  * @head_len:	length of the request head, i.e. offset of the body
  * @body_len:	value of the Content-Length header
@@ -98,6 +99,7 @@ struct httpd_state {
 	bool		head_done;
 	bool		replied;
 	bool		too_big;
+	bool		have_len;
 	bool		is_post;
 	u32		head_len;
 	u32		body_len;
@@ -368,6 +370,27 @@ static void httpd_hdr_param(const char *hdr, const char *key,
 }
 
 /**
+ * httpd_hdr_value() - The value of a header line
+ * @line: the whole line, "Name: value"
+ * @name_len: length of the name including the colon
+ *
+ * simple_strtoul() does not skip leading whitespace the way strtoul(3) does,
+ * so the space that every client puts after the colon has to be stepped over
+ * here - otherwise "Content-Length: 8390144" reads back as zero.
+ *
+ * Return: pointer to the first character of the value
+ */
+static const char *httpd_hdr_value(const char *line, size_t name_len)
+{
+	const char *p = line + name_len;
+
+	while (*p == ' ' || *p == '\t')
+		p++;
+
+	return p;
+}
+
+/**
  * httpd_parse_head() - Parse the request head once it is complete
  * @rx_bytes: contiguous bytes received so far
  *
@@ -429,7 +452,9 @@ static bool httpd_parse_head(u32 rx_bytes)
 		}
 
 		if (!strncasecmp(line, "Content-Length:", 15)) {
-			state.body_len = simple_strtoul(line + 15, NULL, 10);
+			state.body_len = simple_strtoul(httpd_hdr_value(line, 15),
+							NULL, 10);
+			state.have_len = true;
 		} else if (!strncasecmp(line, "Content-Type:", 13)) {
 			httpd_hdr_param(line, "boundary=", state.boundary,
 					sizeof(state.boundary));
@@ -697,6 +722,11 @@ static void httpd_post_upload(struct tcp_stream *tcp)
 	u32 file_offs = 0, file_len = 0;
 	int sep_len;
 
+	if (!state.have_len || !state.body_len) {
+		httpd_error("411 Length Required",
+			    "the upload has no body");
+		return;
+	}
 	if (!state.boundary[0]) {
 		httpd_error("400 Bad Request",
 			    "not a multipart/form-data upload");
