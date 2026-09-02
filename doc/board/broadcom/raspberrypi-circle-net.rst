@@ -257,6 +257,75 @@ upload.
    ``ipaddr`` is empty.  With a static address, set ``ipaddr`` and
    ``web_server`` and the boot never waits for DHCP at all.
 
+When the loader stands down it says which step gave up::
+
+   Web loader: no network, continuing boot          # web_net or web_ip failed
+   Web loader: no web_server or serverip to probe   # nothing to ping
+   Web loader: probing 192.168.1.10                 # ... then ping's own result
+   Web loader: no reply, continuing boot            # the probe found nobody
+
+The probe is tried twice by default.  A USB adapter's link is often not up
+for the first attempt - ``r8152_init_common()`` waits five seconds for it and
+then carries on regardless - so an attempt made while a switch is still
+negotiating gets no reply through no fault of the server.  ``web_tries`` is a
+list of words rather than a count, because hush has no arithmetic and ``for``
+over its words is the only bounded loop there is::
+
+   U-Boot> setenv web_tries '1 2 3 4'   # four attempts, for a slow link
+   U-Boot> setenv web_tries 1           # one, for the fastest boot when
+                                        # nothing is listening
+
+Each attempt that finds nobody costs ``ping``'s ten second timeout.
+
+A reply is not quite the same question as "is the server there".  Plenty of
+machines - Windows hosts especially - drop ICMP echo by default while serving
+HTTP perfectly well, and against one of those the probe can never succeed::
+
+   U-Boot> setenv web_force 1
+   U-Boot> saveenv
+
+That skips the probe and always serves the page, which is also the quickest
+way to tell a probe problem from a loader problem: if the UI comes up with
+``web_force=1``, everything except the ping is working.
+
+.. note::
+
+   A **saved environment hides all of this**.  ``saveenv`` writes the whole
+   environment to ``uboot.env``, and a saved copy from a build before the web
+   loader existed has no ``web_*`` variables and an older ``circle_netpreboot``
+   that never calls ``web_preboot`` - so the loader silently never runs, no
+   matter what the new U-Boot contains.  Check with::
+
+      U-Boot> printenv web_preboot circle_netpreboot
+
+   and if either is missing or does not mention the other, take the new
+   defaults::
+
+      U-Boot> env default -a
+      U-Boot> saveenv
+
+   That discards any customisation, so note down ``ipaddr``, ``web_server``
+   and friends first.
+
+To watch the sequence step by step, run the pieces by hand and see which one
+reports failure::
+
+   U-Boot> run web_net
+   U-Boot> run web_ip
+   U-Boot> run web_ping
+   U-Boot> run web_ui
+
+The upload lands at ``$loadaddr`` (0x1000000) and is capped by
+``httpd_maxsize`` at 64 MiB; ``${circle_addr}`` at 0x80000 is below it and is
+not disturbed, so a running ``bootcircle`` image is never overwritten by an
+upload.
+
+.. note::
+
+   Serving the page needs an address, and ``web_ip`` only runs ``dhcp`` when
+   ``ipaddr`` is empty.  With a static address, set ``ipaddr`` and
+   ``web_server`` and the boot never waits for DHCP at all.
+
 When the loader stands down it says so::
 
    Web loader: no server, continuing boot

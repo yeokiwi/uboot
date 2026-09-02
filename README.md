@@ -482,11 +482,26 @@ U-Boot> saveenv
 To turn the whole thing off: `setenv web_enable 0; saveenv`. To run the UI by
 hand instead: `run net_usb; dhcp; httpd`.
 
-When the loader stands down it says `Web loader: no server, continuing boot` —
-that one line covers no adapter, no address and no reply alike, and `ping`'s
-own "host … is not alive" appears before it when the probe was actually made.
-Running `run web_net`, `run web_ip` and `run web_ping` by hand shows which step
-gives up.
+When the loader stands down it says which step gave up — `no network`,
+`no web_server or serverip to probe`, or `no reply` after announcing the host
+it probed. The probe is tried twice (`web_tries`), because a USB adapter's link
+is often still negotiating during the first attempt.
+
+If the UI never appears, two things account for most of it:
+
+- **The server does not answer ping.** Windows hosts especially drop ICMP echo
+  by default while serving HTTP fine. `setenv web_force 1; saveenv` skips the
+  probe and always serves the page — and doubles as the test: if the UI comes
+  up forced, everything except the ping works.
+- **A saved environment from an older build.** `saveenv` stores the *whole*
+  environment, so a copy written before this feature existed has no `web_*`
+  variables and an older `circle_netpreboot` that never calls `web_preboot` —
+  the loader then never runs, whatever the new U-Boot contains. Check with
+  `printenv web_preboot circle_netpreboot`; if either is missing, `env default
+  -a` then `saveenv` (note down `ipaddr` and `web_server` first).
+
+Run `run web_net`, `run web_ip`, `run web_ping`, `run web_ui` by hand to see
+which step gives up.
 
 The page lists the MMC partitions it can write to with the filesystem on each,
 takes a dropped or chosen file, shows upload progress, and lists what is on the

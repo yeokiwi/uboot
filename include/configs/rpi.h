@@ -92,15 +92,26 @@
  *   web_net    brings the USB Ethernet adapter up and makes it the active
  *              interface - the same "run net_usb" as by hand;
  *   web_ip     leaves a static ipaddr alone and otherwise asks DHCP;
- *   web_ping   pings web_server, or whatever DHCP left in serverip;
+ *   web_ping   probes web_server, or whatever DHCP left in serverip;
  *   web_ui     runs the server, which owns the board until the page's
  *              "Continue boot" button is pressed or Ctrl-C is typed.
  *
- * Any of those failing means the boot carries on as it always did.  The wait
- * is bounded by ping's own timeout, about ten seconds, so an unreachable or
- * absent server costs that much and no more.  Set web_enable to 0 (and
- * saveenv) to skip the whole thing, which also skips the "usb start" that
- * comes with it.
+ * Any of those failing means the boot carries on as it always did, and says
+ * which one gave up.  Set web_enable to 0 (and saveenv) to skip the whole
+ * thing, which also skips the "usb start" that comes with it.
+ *
+ * web_tries is a word list, not a count, because hush has no arithmetic -
+ * "for" over its words is the only bounded loop available.  Two attempts,
+ * because a USB adapter's link is often not up for the first one: the driver
+ * waits five seconds for it in r8152_init_common() and then carries on
+ * regardless, so an attempt made while a switch is still negotiating gets no
+ * reply through no fault of the server.  Each attempt costs ping's ten
+ * second timeout when nothing answers.
+ *
+ * web_force=1 skips the probe and always serves the page.  It is there
+ * because a reply is not the same question as "is the server there": plenty
+ * of machines, Windows hosts especially, drop ICMP echo by default while
+ * serving HTTP perfectly well.
  *
  * The "else true" arms are load-bearing, not padding.  U-Boot's hush returns
  * the *condition's* status for an "if" whose test fails and which has no else
@@ -108,24 +119,44 @@
  * "if test -z ${ipaddr}; then dhcp; fi" reports failure precisely when ipaddr
  * is already set and there is nothing to do, which then breaks the && chain
  * in web_start and skips the loader on exactly the boards that were ready
- * for it.
+ * for it.  web_force is compared as a quoted string for the same class of
+ * reason: "test ${unset} -eq 1" is *true* in U-Boot's test.
  */
 #ifdef CONFIG_CMD_HTTPD
 #define CIRCLE_WEB_ENV_SETTINGS \
 	"web_enable=1\0" \
+	"web_force=0\0" \
 	"web_server=\0" \
 	"web_port=80\0" \
+	"web_tries=1 2\0" \
 	"web_net=run net_usb\0" \
 	"web_ip=if test -z ${ipaddr}; then dhcp; else true; fi\0" \
 	"web_ping=" \
-		"if test -n ${web_server}; then ping ${web_server}; " \
-		"else ping ${serverip}; fi\0" \
+		"setenv web_host ${web_server}; " \
+		"if test -z ${web_host}; then setenv web_host ${serverip}; fi; " \
+		"if test -z ${web_host}; then " \
+			"echo 'Web loader: no web_server or serverip to probe'; " \
+			"false; " \
+		"else " \
+			"echo Web loader: probing ${web_host}; " \
+			"setenv web_ok 0; " \
+			"for web_i in ${web_tries}; do " \
+				"if test ${web_ok} -eq 0; then " \
+					"if ping ${web_host}; then setenv web_ok 1; fi; " \
+				"fi; " \
+			"done; " \
+			"test ${web_ok} -eq 1; " \
+		"fi\0" \
 	"web_ui=httpd ${web_port}\0" \
 	"web_start=" \
-		"if run web_net && run web_ip && run web_ping; then " \
-			"run web_ui; " \
+		"if run web_net && run web_ip; then " \
+			"if test \"${web_force}\" = 1 || run web_ping; then " \
+				"run web_ui; " \
+			"else " \
+				"echo 'Web loader: no reply, continuing boot'; " \
+			"fi; " \
 		"else " \
-			"echo 'Web loader: no server, continuing boot'; " \
+			"echo 'Web loader: no network, continuing boot'; " \
 		"fi\0" \
 	"web_preboot=" \
 		"if test ${web_enable} -eq 1; then run web_start; else true; fi\0"
