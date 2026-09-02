@@ -101,6 +101,14 @@
  * absent server costs that much and no more.  Set web_enable to 0 (and
  * saveenv) to skip the whole thing, which also skips the "usb start" that
  * comes with it.
+ *
+ * The "else true" arms are load-bearing, not padding.  U-Boot's hush returns
+ * the *condition's* status for an "if" whose test fails and which has no else
+ * branch - unlike a POSIX shell, where such an if succeeds.  So a web_ip of
+ * "if test -z ${ipaddr}; then dhcp; fi" reports failure precisely when ipaddr
+ * is already set and there is nothing to do, which then breaks the && chain
+ * in web_start and skips the loader on exactly the boards that were ready
+ * for it.
  */
 #ifdef CONFIG_CMD_HTTPD
 #define CIRCLE_WEB_ENV_SETTINGS \
@@ -108,7 +116,7 @@
 	"web_server=\0" \
 	"web_port=80\0" \
 	"web_net=run net_usb\0" \
-	"web_ip=if test -z ${ipaddr}; then dhcp; fi\0" \
+	"web_ip=if test -z ${ipaddr}; then dhcp; else true; fi\0" \
 	"web_ping=" \
 		"if test -n ${web_server}; then ping ${web_server}; " \
 		"else ping ${serverip}; fi\0" \
@@ -116,8 +124,11 @@
 	"web_start=" \
 		"if run web_net && run web_ip && run web_ping; then " \
 			"run web_ui; " \
+		"else " \
+			"echo 'Web loader: no server, continuing boot'; " \
 		"fi\0" \
-	"web_preboot=if test ${web_enable} -eq 1; then run web_start; fi\0"
+	"web_preboot=" \
+		"if test ${web_enable} -eq 1; then run web_start; else true; fi\0"
 #else
 /* "run" on an undefined variable fails, so it has to exist either way */
 #define CIRCLE_WEB_ENV_SETTINGS \

@@ -482,6 +482,12 @@ U-Boot> saveenv
 To turn the whole thing off: `setenv web_enable 0; saveenv`. To run the UI by
 hand instead: `run net_usb; dhcp; httpd`.
 
+When the loader stands down it says `Web loader: no server, continuing boot` —
+that one line covers no adapter, no address and no reply alike, and `ping`'s
+own "host … is not alive" appears before it when the probe was actually made.
+Running `run web_net`, `run web_ip` and `run web_ping` by hand shows which step
+gives up.
+
 The page lists the MMC partitions it can write to with the filesystem on each,
 takes a dropped or chosen file, shows upload progress, and lists what is on the
 partition before and after. It fetches nothing from the internet — it is served

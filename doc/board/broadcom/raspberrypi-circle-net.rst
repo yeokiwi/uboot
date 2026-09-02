@@ -257,6 +257,27 @@ upload.
    ``ipaddr`` is empty.  With a static address, set ``ipaddr`` and
    ``web_server`` and the boot never waits for DHCP at all.
 
+When the loader stands down it says so::
+
+   Web loader: no server, continuing boot
+
+That line accounts for everything short of a reply: no adapter, no address,
+or a server that did not answer.  ``ping``'s own "host ... is not alive" comes
+first when the probe itself was reached, so the two together say how far the
+sequence got.  To watch each step, run the pieces by hand - ``run web_net``,
+``run web_ip``, ``run web_ping`` - and see which one reports failure.
+
+.. warning::
+
+   Every ``if`` in these variables that can take its false path has an
+   ``else``, and that is not stylistic.  U-Boot's hush returns the
+   *condition's* status for an ``if`` whose test fails and which has no
+   ``else`` branch, where a POSIX shell would return success.  A ``web_ip``
+   written as ``if test -z ${ipaddr}; then dhcp; fi`` therefore reports
+   failure exactly when ``ipaddr`` is already set and there is nothing for it
+   to do, breaking the ``&&`` chain in ``web_start``.  Keep the ``else true``
+   if you rewrite these.
+
 .. note::
 
    ``circle_netcon=1`` and the web loader both want the network early, and
