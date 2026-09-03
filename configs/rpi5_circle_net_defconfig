@@ -143,9 +143,13 @@ CONFIG_ARP_TIMEOUT=1000
 CONFIG_HTTPD=y
 CONFIG_CMD_HTTPD=y
 
-# ARCH_BCM283X already implies FAT_WRITE, so "make savedefconfig" drops this
-# line - but the loader cannot write anything without it, which is the same
-# reason CONFIG_CMD_FAT is spelled out above.
+# ARCH_BCM283X already implies FAT_WRITE, so "make savedefconfig" drops it,
+# but the loader cannot write anything without it - the same reason
+# CONFIG_CMD_FAT is spelled out above.
+#
+# Mind the wording of any comment added here: scripts/kconfig/Makefile runs
+# defconfigs through the C preprocessor, so a line starting "# line", "# if",
+# "# define" or a digit is read as a directive, not as prose.
 CONFIG_FAT_WRITE=y
 
 # "clk dump" is step 3 of the Ethernet bring-up procedure in

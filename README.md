@@ -690,7 +690,12 @@ still on. `bootcircle` reproduces what the armstub does instead —
 Done in CI-equivalent conditions:
 
 - `rpi5_circle_defconfig` and `rpi5_circle_net_defconfig` build clean, zero
-  compiler diagnostics
+  compiler diagnostics, each from a **freshly run defconfig target** in an
+  empty output directory. That last part matters: `scripts/kconfig/Makefile`
+  runs defconfigs through the C preprocessor, so a comment line beginning
+  `# line`, `# if`, `# define` or a digit is read as a directive and breaks
+  the config step only — an incremental `make` over an existing `.config`
+  never sees it
 - `rpi_arm64_defconfig` builds clean, with `bootcircle` and the `circle_*`
   environment absent — no regression to the stock configuration
 - `rpi_2/3/4_defconfig` and `rpi_3_32b/4_32b_defconfig` build clean across both
