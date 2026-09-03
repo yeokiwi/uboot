@@ -187,7 +187,8 @@
 			"echo 'Web loader: no network, continuing boot'; " \
 		"fi\0" \
 	"web_preboot=" \
-		"if test ${web_enable} -eq 1; then run web_start; else true; fi\0"
+		"if test ${web_enable} -eq 1; then run web_start; " \
+		"else echo 'Web loader: disabled (web_enable=0)'; fi\0"
 #else
 /* "run" on an undefined variable fails, so it has to exist either way */
 #define CIRCLE_WEB_ENV_SETTINGS \
@@ -212,8 +213,7 @@
 	"circle_netcon=0\0" \
 	"circle_netpreboot=" \
 		"if test ${circle_usbnet} -eq 1; then usb start; fi; " \
-		"if test ${circle_netcon} -eq 1; then run nc; fi; " \
-		"run web_preboot\0" \
+		"if test ${circle_netcon} -eq 1; then run nc; fi\0" \
 	CIRCLE_WEB_ENV_SETTINGS \
 	"circle_tftp=tftp ${circle_addr} ${circle_kernel}\0" \
 	"circle_netboot=" \

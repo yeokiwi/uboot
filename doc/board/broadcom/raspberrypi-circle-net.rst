@@ -205,10 +205,10 @@ card.  On this board it is the answer to a Pi that is bolted into something:
 no card reader, no serial cable and no TFTP server needed to replace
 ``kernel_2712.img``.
 
-Every boot offers it before the boot command runs::
+Every boot offers it after preboot and before the boot command::
 
-   preboot -> circle_preboot -> circle_netpreboot -> web_preboot
-                                                       |
+   main_loop -> preboot -> EVT_POST_PREBOOT -> web_preboot
+                              (compiled in)       |
                           run net_usb  (usb start, netdev=eth1, ethact=eth1)
                           dhcp         (unless ipaddr is already set)
                           tftpboot 0x80000 ${web_server}:test.img
@@ -216,6 +216,11 @@ Every boot offers it before the boot command runs::
                           fetched               nothing, ~5 s
                             |                    |
                           httpd                 fall through to bootcmd
+
+The steps are environment variables so that any of them can be replaced from
+the prompt, but the hook that runs them is compiled in
+(``board/raspberrypi/rpi/web_loader.c``, on ``EVT_POST_PREBOOT``).  That is
+deliberate: see `A saved environment cannot switch it off`_.
 
 The probe is a real transfer of a real file, not a ping.  That answers "can
 this board be given a file right now" with the very mechanism the answer
@@ -293,24 +298,40 @@ The loader says which step gave up::
 quickest way to tell a probe problem from a loader problem: if the UI comes up
 forced, everything except the transfer is working.
 
-.. note::
+.. _A saved environment cannot switch it off:
 
-   A **saved environment hides all of this**.  ``saveenv`` writes the whole
-   environment to ``uboot.env``, and a saved copy from a build before the web
-   loader existed has no ``web_*`` variables and an older ``circle_netpreboot``
-   that never calls ``web_preboot`` - so the loader silently never runs, no
-   matter what the new U-Boot contains.  Check with::
+A saved environment cannot switch it off
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-      U-Boot> printenv web_preboot circle_netpreboot
+``saveenv`` writes the **whole** environment to ``uboot.env``, and that file
+outlives every reflash of ``u-boot.bin``.  An environment saved before the web
+loader existed has no ``web_*`` variables and a ``circle_netpreboot`` that
+never calls ``web_preboot``, so for a while the loader could silently never
+run however new the binary was - and a saved ``web_enable=0`` did the same.
+Both looked exactly like the loader being broken: nothing was printed at all.
 
-   and if either is missing or does not mention the other, take the new
-   defaults::
+Two things make that impossible now.  The hook is compiled in rather than
+saved, so ``circle_netpreboot`` no longer has anything to do with it; and
+before running the sequence the hook puts back any network or loader setting
+the environment is missing, saying so as it does::
 
-      U-Boot> env default -a
-      U-Boot> saveenv
+   Web loader: 11 setting(s) were missing from the saved environment
+   Web loader: using the built-in defaults; "env default -a; saveenv" makes that permanent
 
-   That discards any customisation, so note down ``ipaddr``, ``web_server``
-   and friends first.
+Only missing variables are filled in.  A customised ``web_server``,
+``web_file`` or ``netdev`` is never touched, whatever its value - including
+``web_enable=0``, which is still how you turn the loader off, and which now
+says so::
+
+   Web loader: disabled (web_enable=0)
+
+To go back to the defaults for good::
+
+   U-Boot> env default -a
+   U-Boot> saveenv
+
+That discards any customisation, so note down ``ipaddr``, ``web_server`` and
+friends first.
 
 To watch the sequence step by step, run the pieces by hand and see which one
 reports failure::

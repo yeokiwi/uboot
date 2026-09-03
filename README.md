@@ -454,8 +454,8 @@ a TFTP client — a browser on the same network is enough.
 transfer:
 
 ```
-preboot → circle_preboot → circle_netpreboot → web_preboot
-                                                  │
+main_loop → preboot → EVT_POST_PREBOOT → web_preboot
+                        (compiled in)       │
                              run net_usb   USB adapter becomes the active interface
                              dhcp          (skipped if ipaddr is already set)
                              tftpboot 0x80000 ${web_server}:test.img
@@ -507,12 +507,14 @@ never appears, two things account for most of it:
 - **The probe cannot reach the server.** `setenv web_force 1; saveenv` skips it
   and always serves the page — and doubles as the test: if the UI comes up
   forced, everything except the transfer works.
-- **A saved environment from an older build.** `saveenv` stores the *whole*
-  environment, so a copy written before this feature existed has no `web_*`
-  variables and an older `circle_netpreboot` that never calls `web_preboot` —
-  the loader then never runs, whatever the new U-Boot contains. Check with
-  `printenv web_preboot circle_netpreboot`; if either is missing, `env default
-  -a` then `saveenv` (note down `ipaddr` and `web_server` first).
+- **A saved environment.** `saveenv` stores the *whole* environment to
+  `uboot.env`, which outlives every reflash of `u-boot.bin` — so an environment
+  saved before this feature existed used to switch the loader off silently.
+  It can't any more: the hook that runs the loader is compiled in
+  (`board/raspberrypi/rpi/web_loader.c`, on `EVT_POST_PREBOOT`) rather than
+  reached through `circle_netpreboot`, and it fills in any setting the saved
+  environment is missing, announcing what it restored. `env default -a; saveenv`
+  still makes that permanent (note down `ipaddr` and `web_server` first).
 
 Run `run web_net`, `run web_ip`, `run web_probe`, `run web_ui` by hand to see
 which step gives up.
@@ -652,7 +654,8 @@ ping that decides whether to run it:
 | `httpd` command | `cmd/httpd.c` |
 | `HTTPD` protocol in the net loop | `net/net.c`, `include/net-legacy.h` |
 | `CONFIG_HTTPD`, `CONFIG_CMD_HTTPD` | `net/Kconfig`, `cmd/Kconfig` |
-| `web_*` environment and the `web_preboot` hook | `include/configs/rpi.h` |
+| `web_*` environment | `include/configs/rpi.h` |
+| Compiled-in preboot hook, restores a stale environment | `board/raspberrypi/rpi/web_loader.c` |
 | `HTTPD`, `CMD_HTTPD`, `FAT_WRITE`, `ARP_TIMEOUT` | `configs/rpi5_circle_net_defconfig` |
 | Command documentation | `doc/usage/cmd/httpd.rst` |
 
