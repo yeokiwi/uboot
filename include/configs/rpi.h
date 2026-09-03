@@ -92,26 +92,41 @@
  *   web_net    brings the USB Ethernet adapter up and makes it the active
  *              interface - the same "run net_usb" as by hand;
  *   web_ip     leaves a static ipaddr alone and otherwise asks DHCP;
- *   web_ping   probes web_server, or whatever DHCP left in serverip;
+ *   web_probe  TFTPs web_file from web_server, or from whatever DHCP left
+ *              in serverip;
  *   web_ui     runs the server, which owns the board until the page's
  *              "Continue boot" button is pressed or Ctrl-C is typed.
  *
- * Any of those failing means the boot carries on as it always did, and says
- * which one gave up.  Set web_enable to 0 (and saveenv) to skip the whole
- * thing, which also skips the "usb start" that comes with it.
+ * The probe is a real transfer of a real file rather than a ping, and that
+ * is the point: it answers "can this board be given a file right now" with
+ * the very mechanism the answer depends on, instead of with ICMP - which
+ * plenty of servers drop while serving perfectly well.  It also puts the
+ * decision in the hands of whoever runs the server: drop test.img into the
+ * TFTP root to have the next boot stop at the web UI, take it away to have
+ * the board boot straight through.  A server that answers with "file not
+ * found" is a decision too, and an immediate one - U-Boot does not retry it.
  *
- * web_tries is a word list, not a count, because hush has no arithmetic -
- * "for" over its words is the only bounded loop available.  Two attempts,
- * because a USB adapter's link is often not up for the first one: the driver
- * waits five seconds for it in r8152_init_common() and then carries on
- * regardless, so an attempt made while a switch is still negotiating gets no
- * reply through no fault of the server.  Each attempt costs ping's ten
- * second timeout when nothing answers.
+ * Five seconds, near enough, is the cost when nothing answers.  Two limits
+ * set it, and neither can be left at its default: tftptimeout (1 s) and
+ * tftptimeoutcountmax (4) bound the transfer to about five seconds, and
+ * CONFIG_ARP_TIMEOUT (1 s in rpi5_circle_net_defconfig, against a 5 s
+ * default) bounds the case where the server does not answer ARP at all -
+ * five retries of it, and no environment variable can shorten them.  The two
+ * TFTP limits are saved and put back around the probe so that a real
+ * circle_netboot keeps the patience it was written with.
  *
- * web_force=1 skips the probe and always serves the page.  It is there
- * because a reply is not the same question as "is the server there": plenty
- * of machines, Windows hosts especially, drop ICMP echo by default while
- * serving HTTP perfectly well.
+ * web_addr is where the probe file lands.  0x80000 is circle_addr, which is
+ * safe because circle_boot only jumps after its own fatload has succeeded -
+ * it never boots what the probe left there.  httpd_addr is set explicitly
+ * for the same reason in reverse: "tftpboot <addr>" moves image_load_addr,
+ * and the upload buffer must not follow the probe around.
+ *
+ * web_tries is a word list, not a count, because hush has no arithmetic;
+ * "for" over its words is the only bounded loop there is.  One attempt keeps
+ * to the five seconds asked of it - add a word for a second attempt if the
+ * adapter's link is slow to come up.
+ *
+ * web_force=1 skips the probe and always serves the page.
  *
  * The "else true" arms are load-bearing, not padding.  U-Boot's hush returns
  * the *condition's* status for an "if" whose test fails and which has no else
@@ -128,32 +143,45 @@
 	"web_force=0\0" \
 	"web_server=\0" \
 	"web_port=80\0" \
-	"web_tries=1 2\0" \
+	"web_file=test.img\0" \
+	"web_addr=0x80000\0" \
+	"web_tries=1\0" \
+	"web_tftp_ms=1000\0" \
+	"web_tftp_max=4\0" \
+	"httpd_addr=0x1000000\0" \
 	"web_net=run net_usb\0" \
 	"web_ip=if test -z ${ipaddr}; then dhcp; else true; fi\0" \
-	"web_ping=" \
+	"web_probe=" \
 		"setenv web_host ${web_server}; " \
 		"if test -z ${web_host}; then setenv web_host ${serverip}; fi; " \
 		"if test -z ${web_host}; then " \
 			"echo 'Web loader: no web_server or serverip to probe'; " \
 			"false; " \
 		"else " \
-			"echo Web loader: probing ${web_host}; " \
+			"echo Web loader: asking ${web_host} for ${web_file}; " \
+			"setenv web_t ${tftptimeout}; " \
+			"setenv web_c ${tftptimeoutcountmax}; " \
+			"setenv tftptimeout ${web_tftp_ms}; " \
+			"setenv tftptimeoutcountmax ${web_tftp_max}; " \
 			"setenv web_ok 0; " \
 			"for web_i in ${web_tries}; do " \
 				"if test ${web_ok} -eq 0; then " \
-					"if ping ${web_host}; then setenv web_ok 1; fi; " \
+					"if tftpboot ${web_addr} ${web_host}:${web_file}; then " \
+						"setenv web_ok 1; " \
+					"fi; " \
 				"fi; " \
 			"done; " \
+			"setenv tftptimeout ${web_t}; " \
+			"setenv tftptimeoutcountmax ${web_c}; " \
 			"test ${web_ok} -eq 1; " \
 		"fi\0" \
 	"web_ui=httpd ${web_port}\0" \
 	"web_start=" \
 		"if run web_net && run web_ip; then " \
-			"if test \"${web_force}\" = 1 || run web_ping; then " \
+			"if test \"${web_force}\" = 1 || run web_probe; then " \
 				"run web_ui; " \
 			"else " \
-				"echo 'Web loader: no reply, continuing boot'; " \
+				"echo Web loader: no ${web_file}, continuing boot; " \
 			"fi; " \
 		"else " \
 			"echo 'Web loader: no network, continuing boot'; " \

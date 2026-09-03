@@ -130,6 +130,14 @@ CONFIG_USB_XHCI_DWC3=y
 # Network console.  Requires the legacy stack; see the note above.
 CONFIG_NETCONSOLE=y
 
+# The web loader probes for its server with a TFTP transfer, and has five
+# seconds to decide.  CONFIG_ARP_TIMEOUT bounds the case where the server does
+# not answer ARP at all - five retries of it, with no environment variable to
+# shorten them - so the stock 5000 would spend 25 seconds on every boot with
+# nothing listening.  1000 gives five 1-second tries, and only makes ARP
+# retransmit sooner for everything else.
+CONFIG_ARP_TIMEOUT=1000
+
 # The storage loader web UI: a browser writes a file to the SD card.
 # CONFIG_HTTPD selects PROT_TCP, the legacy stack's TCP implementation.
 CONFIG_HTTPD=y

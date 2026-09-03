@@ -211,21 +211,26 @@ Every boot offers it before the boot command runs::
                                                        |
                           run net_usb  (usb start, netdev=eth1, ethact=eth1)
                           dhcp         (unless ipaddr is already set)
-                          ping ${web_server:-serverip}
+                          tftpboot 0x80000 ${web_server}:test.img
                             |                    |
-                          reply                 silence
+                          fetched               nothing, ~5 s
                             |                    |
                           httpd                 fall through to bootcmd
 
-The ping is the whole decision: a machine that answers is taken to mean
-someone is there to hand the board a file, so the UI is served and the board
-waits.  Nothing answering - no adapter, no cable, no DHCP, no server - costs
-about ten seconds, ping's own timeout, and then the board boots as it always
-did.  The server likewise gives the board back the moment the page's
-*Continue boot* button is pressed or Ctrl-C is typed on the console.
+The probe is a real transfer of a real file, not a ping.  That answers "can
+this board be given a file right now" with the very mechanism the answer
+depends on, and it puts the decision where it belongs - with whoever runs the
+server::
 
-Point it at the machine that will do the flashing rather than at whatever
-DHCP handed over as ``serverip``::
+   $ cp /dev/null /srv/tftp/test.img     # next boot stops at the web UI
+   $ rm /srv/tftp/test.img               # next boot goes straight to Circle
+
+An empty file is enough; the probe only cares that the transfer succeeded.  A
+server that answers "file not found" is a decision too, and U-Boot does not
+retry that - the boot carries straight on.
+
+Point the probe at the machine that will do the flashing, rather than at
+whatever DHCP left in ``serverip``::
 
    U-Boot> setenv web_server 192.168.1.10
    U-Boot> saveenv
@@ -235,58 +240,58 @@ and turn the whole thing off with::
    U-Boot> setenv web_enable 0
    U-Boot> saveenv
 
-The pieces are separate variables so that any of them can be replaced.  To
-use the onboard interface instead of a USB adapter::
+Five seconds when nothing answers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   U-Boot> setenv web_net 'run net_onboard'
+Three limits bound the wait, and none of them can be left at its default:
 
-To run the UI unconditionally, without asking the network first::
+``tftptimeout`` (``web_tftp_ms``, 1 s) and ``tftptimeoutcountmax``
+(``web_tftp_max``, 4) bound a server that answers ARP but not TFTP: four
+retries of one second, about five seconds in all.  Both are saved and put
+back around the probe, so a real ``circle_netboot`` keeps the patience it was
+written with.
 
-   U-Boot> setenv web_start 'if run web_net && run web_ip; then run web_ui; fi'
+``CONFIG_ARP_TIMEOUT`` bounds the server that answers nothing at all.  ARP is
+retried ``CONFIG_NET_RETRY_COUNT`` times and **no environment variable can
+shorten it**, so the stock 5000 ms would spend 25 seconds on every boot with
+nothing listening.  ``rpi5_circle_net_defconfig`` sets it to 1000, which is
+five one-second tries.
 
-or, from a prompt, just ``run net_usb; dhcp; httpd``.
+``web_tries`` is one attempt by default, which is what keeps to the five
+seconds.  A USB adapter's link is sometimes not up for the first one -
+``r8152_init_common()`` waits five seconds for it and then carries on
+regardless - so add a word for a second attempt if that bites::
 
-The upload lands at ``$loadaddr`` (0x1000000) and is capped by
-``httpd_maxsize`` at 64 MiB; ``${circle_addr}`` at 0x80000 is below it and is
-not disturbed, so a running ``bootcircle`` image is never overwritten by an
-upload.
+   U-Boot> setenv web_tries '1 2'
 
-.. note::
+Each extra word costs another probe's worth of seconds when nothing answers.
+It is a list of words rather than a count because hush has no arithmetic:
+``for`` over its words is the only bounded loop there is.
 
-   Serving the page needs an address, and ``web_ip`` only runs ``dhcp`` when
-   ``ipaddr`` is empty.  With a static address, set ``ipaddr`` and
-   ``web_server`` and the boot never waits for DHCP at all.
+Where things land
+~~~~~~~~~~~~~~~~~
 
-When the loader stands down it says which step gave up::
+``web_addr`` (0x80000) is where the probe file is written.  That is
+``circle_addr``, and it is safe: ``circle_boot`` only jumps after its own
+``fatload`` has succeeded, so it never boots what the probe left behind.
+
+``httpd_addr`` (0x1000000) is set explicitly for the same reason in reverse.
+``tftpboot <addr>`` moves ``image_load_addr``, which is what the upload buffer
+would otherwise default to, and the buffer must not follow the probe around.
+
+When it does not come up
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The loader says which step gave up::
 
    Web loader: no network, continuing boot          # web_net or web_ip failed
-   Web loader: no web_server or serverip to probe   # nothing to ping
-   Web loader: probing 192.168.1.10                 # ... then ping's own result
-   Web loader: no reply, continuing boot            # the probe found nobody
+   Web loader: no web_server or serverip to probe   # nothing to ask
+   Web loader: asking 192.168.1.10 for test.img     # ... then tftp's own result
+   Web loader: no test.img, continuing boot         # the probe came back empty
 
-The probe is tried twice by default.  A USB adapter's link is often not up
-for the first attempt - ``r8152_init_common()`` waits five seconds for it and
-then carries on regardless - so an attempt made while a switch is still
-negotiating gets no reply through no fault of the server.  ``web_tries`` is a
-list of words rather than a count, because hush has no arithmetic and ``for``
-over its words is the only bounded loop there is::
-
-   U-Boot> setenv web_tries '1 2 3 4'   # four attempts, for a slow link
-   U-Boot> setenv web_tries 1           # one, for the fastest boot when
-                                        # nothing is listening
-
-Each attempt that finds nobody costs ``ping``'s ten second timeout.
-
-A reply is not quite the same question as "is the server there".  Plenty of
-machines - Windows hosts especially - drop ICMP echo by default while serving
-HTTP perfectly well, and against one of those the probe can never succeed::
-
-   U-Boot> setenv web_force 1
-   U-Boot> saveenv
-
-That skips the probe and always serves the page, which is also the quickest
-way to tell a probe problem from a loader problem: if the UI comes up with
-``web_force=1``, everything except the ping is working.
+``web_force=1`` skips the probe and always serves the page, which is the
+quickest way to tell a probe problem from a loader problem: if the UI comes up
+forced, everything except the transfer is working.
 
 .. note::
 
@@ -312,47 +317,8 @@ reports failure::
 
    U-Boot> run web_net
    U-Boot> run web_ip
-   U-Boot> run web_ping
+   U-Boot> run web_probe
    U-Boot> run web_ui
-
-The upload lands at ``$loadaddr`` (0x1000000) and is capped by
-``httpd_maxsize`` at 64 MiB; ``${circle_addr}`` at 0x80000 is below it and is
-not disturbed, so a running ``bootcircle`` image is never overwritten by an
-upload.
-
-.. note::
-
-   Serving the page needs an address, and ``web_ip`` only runs ``dhcp`` when
-   ``ipaddr`` is empty.  With a static address, set ``ipaddr`` and
-   ``web_server`` and the boot never waits for DHCP at all.
-
-When the loader stands down it says so::
-
-   Web loader: no server, continuing boot
-
-That line accounts for everything short of a reply: no adapter, no address,
-or a server that did not answer.  ``ping``'s own "host ... is not alive" comes
-first when the probe itself was reached, so the two together say how far the
-sequence got.  To watch each step, run the pieces by hand - ``run web_net``,
-``run web_ip``, ``run web_ping`` - and see which one reports failure.
-
-.. warning::
-
-   Every ``if`` in these variables that can take its false path has an
-   ``else``, and that is not stylistic.  U-Boot's hush returns the
-   *condition's* status for an ``if`` whose test fails and which has no
-   ``else`` branch, where a POSIX shell would return success.  A ``web_ip``
-   written as ``if test -z ${ipaddr}; then dhcp; fi`` therefore reports
-   failure exactly when ``ipaddr`` is already set and there is nothing for it
-   to do, breaking the ``&&`` chain in ``web_start``.  Keep the ``else true``
-   if you rewrite these.
-
-.. note::
-
-   ``circle_netcon=1`` and the web loader both want the network early, and
-   the console follows ``netdev`` while the loader forces it to the USB
-   adapter.  Set ``netdev=eth1`` if you want the network console on the same
-   interface the loader uses.
 
 USB Ethernet adapters
 ---------------------

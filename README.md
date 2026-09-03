@@ -448,28 +448,36 @@ U-Boot release. RTL8157 (5G) is patch 5/5 of that series and is not carried.
 The network build serves a web page that writes an uploaded file to the SD
 card or eMMC. It exists for the Pi that is already installed in something:
 replacing `kernel_2712.img` needs neither a card reader nor a serial cable nor
-a TFTP server — a browser on the same network is enough.
+a TFTP client — a browser on the same network is enough.
 
-**Every boot offers it before `bootcmd` runs**, and the decision is one ping:
+**Every boot offers it before `bootcmd` runs**, and the decision is one TFTP
+transfer:
 
 ```
 preboot → circle_preboot → circle_netpreboot → web_preboot
                                                   │
                              run net_usb   USB adapter becomes the active interface
                              dhcp          (skipped if ipaddr is already set)
-                             ping ${web_server}   ← or serverip, from DHCP
+                             tftpboot 0x80000 ${web_server}:test.img
                                │                     │
-                             reply                 silence
+                             fetched               nothing, ~5 s
                                │                     │
                              httpd — the board waits │
                                                      └→ bootcmd, as normal
 ```
 
-A machine that answers means someone is there to hand the board a file, so the
-UI is served and the board waits for it. Nothing answering — no adapter, no
-cable, no DHCP, no server — costs about ten seconds, which is `ping`'s own
-timeout, and then the board boots as it always did. The page's **Continue
-boot** button (and Ctrl-C on the console) gives the board back at any time.
+The probe is a real transfer of a real file rather than a ping, which answers
+"can this board be given a file right now" with the very mechanism the answer
+depends on. It also puts the decision with whoever runs the server:
+
+```bash
+cp /dev/null /srv/tftp/test.img   # next boot stops at the web UI
+rm /srv/tftp/test.img             # next boot goes straight to Circle
+```
+
+An empty file is enough — only the transfer succeeding matters. A server that
+answers "file not found" is a decision too, and an immediate one: U-Boot does
+not retry that.
 
 Point it at the machine that will do the flashing, rather than at whatever
 DHCP left in `serverip`:
@@ -482,17 +490,23 @@ U-Boot> saveenv
 To turn the whole thing off: `setenv web_enable 0; saveenv`. To run the UI by
 hand instead: `run net_usb; dhcp; httpd`.
 
-When the loader stands down it says which step gave up — `no network`,
-`no web_server or serverip to probe`, or `no reply` after announcing the host
-it probed. The probe is tried twice (`web_tries`), because a USB adapter's link
-is often still negotiating during the first attempt.
+**Five seconds when nothing answers.** `tftptimeout` (1 s) and
+`tftptimeoutcountmax` (4) bound a server that answers ARP but not TFTP, and are
+saved and restored around the probe so a real `circle_netboot` keeps its own
+patience. `CONFIG_ARP_TIMEOUT` bounds the server that answers nothing at all —
+ARP is retried five times and **no environment variable can shorten it**, so
+the network config sets it to 1000 ms rather than the stock 5000, which would
+otherwise spend 25 s on every boot with nothing listening. `web_tries` is one
+attempt by default; add a word (`setenv web_tries '1 2'`) if the adapter's link
+is slow to come up, at the cost of another probe's worth of seconds.
 
-If the UI never appears, two things account for most of it:
+The stand-down says which step gave up — `no network`, `no web_server or
+serverip to probe`, or `no test.img` after naming the host it asked. If the UI
+never appears, two things account for most of it:
 
-- **The server does not answer ping.** Windows hosts especially drop ICMP echo
-  by default while serving HTTP fine. `setenv web_force 1; saveenv` skips the
-  probe and always serves the page — and doubles as the test: if the UI comes
-  up forced, everything except the ping works.
+- **The probe cannot reach the server.** `setenv web_force 1; saveenv` skips it
+  and always serves the page — and doubles as the test: if the UI comes up
+  forced, everything except the transfer works.
 - **A saved environment from an older build.** `saveenv` stores the *whole*
   environment, so a copy written before this feature existed has no `web_*`
   variables and an older `circle_netpreboot` that never calls `web_preboot` —
@@ -500,7 +514,7 @@ If the UI never appears, two things account for most of it:
   `printenv web_preboot circle_netpreboot`; if either is missing, `env default
   -a` then `saveenv` (note down `ipaddr` and `web_server` first).
 
-Run `run web_net`, `run web_ip`, `run web_ping`, `run web_ui` by hand to see
+Run `run web_net`, `run web_ip`, `run web_probe`, `run web_ui` by hand to see
 which step gives up.
 
 The page lists the MMC partitions it can write to with the filesystem on each,
@@ -513,7 +527,7 @@ curl -F iface=mmc -F part=0:1 -F name=kernel_2712.img \
      -F file=@kernel_2712.img http://<board-ip>/api/upload
 ```
 
-The upload is buffered at `$loadaddr` (`httpd_addr`) and capped at 64 MiB
+The upload is buffered at `httpd_addr` (0x1000000) and capped at 64 MiB
 (`httpd_maxsize`), and the write goes through the filesystem, so the target
 partition needs `CONFIG_FAT_WRITE` — which the network config enables.
 
@@ -639,7 +653,7 @@ ping that decides whether to run it:
 | `HTTPD` protocol in the net loop | `net/net.c`, `include/net-legacy.h` |
 | `CONFIG_HTTPD`, `CONFIG_CMD_HTTPD` | `net/Kconfig`, `cmd/Kconfig` |
 | `web_*` environment and the `web_preboot` hook | `include/configs/rpi.h` |
-| `HTTPD`, `CMD_HTTPD`, `FAT_WRITE` | `configs/rpi5_circle_net_defconfig` |
+| `HTTPD`, `CMD_HTTPD`, `FAT_WRITE`, `ARP_TIMEOUT` | `configs/rpi5_circle_net_defconfig` |
 | Command documentation | `doc/usage/cmd/httpd.rst` |
 
 RTL8156/RTL8156B (2.5GbE) and RTL8153C — carried from ChunHao Lin's unmerged
